@@ -37,16 +37,36 @@ let HrService = HrService_1 = class HrService {
             data: { status }
         });
     }
+    async cancelLeave(leaveId, userId) {
+        const leave = await this.prisma.leave.findUnique({ where: { id: leaveId } });
+        if (!leave)
+            throw new common_1.NotFoundException('Leave request not found');
+        if (leave.userId !== userId)
+            throw new common_1.ForbiddenException('Not your leave request');
+        if (leave.status !== 'PENDING') {
+            throw new common_1.BadRequestException('Only PENDING leave requests can be cancelled');
+        }
+        await this.prisma.leave.delete({ where: { id: leaveId } });
+    }
     async getMyLeaves(userId) {
         return this.prisma.leave.findMany({
             where: { userId },
             orderBy: { startDate: 'desc' }
         });
     }
-    async getAllLeaves() {
+    async getAllLeaves(query = {}) {
+        const page = query.page ?? 1;
+        const limit = query.limit ?? 20;
+        const skip = (page - 1) * limit;
         return this.prisma.leave.findMany({
+            where: {
+                status: query.status,
+                userId: query.userId,
+            },
             include: { user: { select: { firstName: true, lastName: true, email: true, role: true } } },
-            orderBy: { startDate: 'desc' }
+            orderBy: { startDate: 'desc' },
+            skip,
+            take: limit,
         });
     }
     async generatePayslipForUser(userId, month, year) {
@@ -113,10 +133,20 @@ let HrService = HrService_1 = class HrService {
             orderBy: [{ year: 'desc' }, { month: 'desc' }]
         });
     }
-    async getAllPayslips() {
+    async getAllPayslips(query = {}) {
+        const page = query.page ?? 1;
+        const limit = query.limit ?? 20;
+        const skip = (page - 1) * limit;
         return this.prisma.payslip.findMany({
+            where: {
+                userId: query.userId,
+                year: query.year,
+                month: query.month,
+            },
             include: { user: { select: { firstName: true, lastName: true, role: true } } },
-            orderBy: [{ year: 'desc' }, { month: 'desc' }]
+            orderBy: [{ year: 'desc' }, { month: 'desc' }],
+            skip,
+            take: limit,
         });
     }
 };

@@ -46,16 +46,14 @@ exports.AuthService = void 0;
 const common_1 = require("@nestjs/common");
 const jwt_1 = require("@nestjs/jwt");
 const users_service_1 = require("../users/users.service");
-const prisma_service_1 = require("../prisma/prisma.service");
 const bcrypt = __importStar(require("bcrypt"));
+const client_1 = require("@prisma/client");
 let AuthService = class AuthService {
     usersService;
     jwtService;
-    prisma;
-    constructor(usersService, jwtService, prisma) {
+    constructor(usersService, jwtService) {
         this.usersService = usersService;
         this.jwtService = jwtService;
-        this.prisma = prisma;
     }
     async validateUser(email, pass) {
         const user = await this.usersService.findByEmail(email);
@@ -83,15 +81,21 @@ let AuthService = class AuthService {
         };
     }
     async registerUser(data) {
+        const disallowedRoles = [client_1.Role.SUPER_ADMIN, client_1.Role.NGO_ADMIN, client_1.Role.HR_MANAGER, client_1.Role.FINANCE_MANAGER];
+        if (disallowedRoles.includes(data.role)) {
+            throw new common_1.ForbiddenException('Role cannot be self-registered');
+        }
         const user = await this.usersService.create(data);
         return this.login(user);
+    }
+    async getProfile(userId) {
+        return this.usersService.findOne(userId);
     }
 };
 exports.AuthService = AuthService;
 exports.AuthService = AuthService = __decorate([
     (0, common_1.Injectable)(),
     __metadata("design:paramtypes", [users_service_1.UsersService,
-        jwt_1.JwtService,
-        prisma_service_1.PrismaService])
+        jwt_1.JwtService])
 ], AuthService);
 //# sourceMappingURL=auth.service.js.map

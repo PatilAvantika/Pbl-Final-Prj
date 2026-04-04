@@ -28,7 +28,13 @@ let AttendanceController = class AttendanceController {
         if (!data.lat || !data.lng || !data.taskId || !data.uniqueRequestId || !data.deviceId) {
             throw new common_1.BadRequestException('Missing required fields for geo-verified clock-in');
         }
-        return this.attendanceService.clockIn(req.user.id, data);
+        return this.attendanceService.clockIn(req.user.id, req.user.role, data);
+    }
+    async clockOut(req, data) {
+        if (!data.lat || !data.lng || !data.taskId || !data.uniqueRequestId || !data.deviceId) {
+            throw new common_1.BadRequestException('Missing required fields for geo-verified clock-out');
+        }
+        return this.attendanceService.clockOut(req.user.id, req.user.role, data);
     }
     getMyAttendances(req) {
         return this.attendanceService.getMyAttendances(req.user.id);
@@ -46,6 +52,14 @@ __decorate([
     __metadata("design:paramtypes", [Object, attendance_service_1.ClockInDto]),
     __metadata("design:returntype", Promise)
 ], AttendanceController.prototype, "clockIn", null);
+__decorate([
+    (0, common_1.Post)('clock-out'),
+    __param(0, (0, common_1.Request)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, attendance_service_1.ClockInDto]),
+    __metadata("design:returntype", Promise)
+], AttendanceController.prototype, "clockOut", null);
 __decorate([
     (0, common_1.Get)('my-history'),
     __param(0, (0, common_1.Request)()),

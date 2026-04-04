@@ -21,6 +21,7 @@ let ReportsService = class ReportsService {
         this.tasksService = tasksService;
     }
     async create(userId, data) {
+        await this.tasksService.assertUserAssignedToTask(userId, data.taskId);
         await this.tasksService.findOne(data.taskId);
         return this.prisma.fieldReport.create({
             data: {
@@ -29,18 +30,30 @@ let ReportsService = class ReportsService {
             }
         });
     }
-    async findAll() {
+    async findAll(query = {}) {
+        const page = query.page ?? 1;
+        const limit = query.limit ?? 20;
+        const skip = (page - 1) * limit;
         return this.prisma.fieldReport.findMany({
+            where: {
+                taskId: query.taskId,
+                userId: query.userId,
+                status: query.status,
+            },
             include: {
                 task: true,
+                user: { select: { firstName: true, lastName: true, role: true } },
+                approvedBy: { select: { firstName: true, lastName: true, role: true } },
             },
             orderBy: { timestamp: 'desc' },
+            skip,
+            take: limit,
         });
     }
     async findOne(id) {
         const report = await this.prisma.fieldReport.findUnique({
             where: { id },
-            include: { task: true }
+            include: { task: true, user: true, approvedBy: true }
         });
         if (!report)
             throw new common_1.NotFoundException('Report not found');
@@ -49,6 +62,7 @@ let ReportsService = class ReportsService {
     async findByTask(taskId) {
         return this.prisma.fieldReport.findMany({
             where: { taskId },
+            include: { user: { select: { firstName: true, lastName: true, role: true } } },
             orderBy: { timestamp: 'desc' }
         });
     }
@@ -57,6 +71,22 @@ let ReportsService = class ReportsService {
             where: { userId },
             include: { task: true },
             orderBy: { timestamp: 'desc' }
+        });
+    }
+    async updateStatus(reportId, status, approverId) {
+        await this.findOne(reportId);
+        return this.prisma.fieldReport.update({
+            where: { id: reportId },
+            data: {
+                status,
+                approvedById: approverId,
+                approvedAt: new Date(),
+            },
+            include: {
+                task: true,
+                user: { select: { firstName: true, lastName: true, role: true } },
+                approvedBy: { select: { firstName: true, lastName: true, role: true } },
+            },
         });
     }
 };

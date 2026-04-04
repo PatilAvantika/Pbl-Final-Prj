@@ -1,7 +1,6 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { UsersService } from '../users/users.service';
-import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
 import { Role } from '@prisma/client';
 
@@ -16,7 +15,6 @@ export class AuthService {
     constructor(
         private usersService: UsersService,
         private jwtService: JwtService,
-        private prisma: PrismaService,
     ) { }
 
     async validateUser(email: string, pass: string): Promise<any> {
@@ -47,8 +45,15 @@ export class AuthService {
     }
 
     async registerUser(data: any) {
-        // In production we would have separate flows (e.g. HR registration), but for testing we can expose registration
+        const disallowedRoles: Role[] = [Role.SUPER_ADMIN, Role.NGO_ADMIN, Role.HR_MANAGER, Role.FINANCE_MANAGER];
+        if (disallowedRoles.includes(data.role)) {
+            throw new ForbiddenException('Role cannot be self-registered');
+        }
         const user = await this.usersService.create(data);
         return this.login(user);
+    }
+
+    async getProfile(userId: string) {
+        return this.usersService.findOne(userId);
     }
 }

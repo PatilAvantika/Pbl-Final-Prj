@@ -15,37 +15,56 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.AuthController = void 0;
 const common_1 = require("@nestjs/common");
 const auth_service_1 = require("./auth.service");
-const client_1 = require("@prisma/client");
 const passport_1 = require("@nestjs/passport");
+const auth_dto_1 = require("./dto/auth.dto");
 let AuthController = class AuthController {
     authService;
     constructor(authService) {
         this.authService = authService;
     }
-    async login(body) {
-        const user = await this.authService.validateUser(body.email, body.password);
-        return this.authService.login(user);
+    setAuthCookie(res, token) {
+        res.cookie('token', token, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+            maxAge: 1000 * 60 * 60 * 24,
+            path: '/',
+        });
     }
-    async register(body) {
-        return this.authService.registerUser(body);
+    async login(body, res) {
+        const user = await this.authService.validateUser(body.email, body.password);
+        const result = await this.authService.login(user);
+        this.setAuthCookie(res, result.access_token);
+        return result;
+    }
+    async register(body, res) {
+        const result = await this.authService.registerUser(body);
+        this.setAuthCookie(res, result.access_token);
+        return result;
     }
     getProfile(req) {
-        return req.user;
+        return this.authService.getProfile(req.user.id);
+    }
+    logout(res) {
+        res.clearCookie('token', { path: '/' });
+        return { success: true };
     }
 };
 exports.AuthController = AuthController;
 __decorate([
     (0, common_1.Post)('login'),
     __param(0, (0, common_1.Body)()),
+    __param(1, (0, common_1.Res)({ passthrough: true })),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object]),
+    __metadata("design:paramtypes", [auth_dto_1.LoginDto, Object]),
     __metadata("design:returntype", Promise)
 ], AuthController.prototype, "login", null);
 __decorate([
     (0, common_1.Post)('register'),
     __param(0, (0, common_1.Body)()),
+    __param(1, (0, common_1.Res)({ passthrough: true })),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object]),
+    __metadata("design:paramtypes", [auth_dto_1.RegisterDto, Object]),
     __metadata("design:returntype", Promise)
 ], AuthController.prototype, "register", null);
 __decorate([
@@ -56,6 +75,13 @@ __decorate([
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", void 0)
 ], AuthController.prototype, "getProfile", null);
+__decorate([
+    (0, common_1.Post)('logout'),
+    __param(0, (0, common_1.Res)({ passthrough: true })),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AuthController.prototype, "logout", null);
 exports.AuthController = AuthController = __decorate([
     (0, common_1.Controller)('auth'),
     __metadata("design:paramtypes", [auth_service_1.AuthService])

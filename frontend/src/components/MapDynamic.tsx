@@ -10,5 +10,9 @@ const MapNoSSR = dynamic(() => import('./LiveMap'), {
 });
 
 export default function MapDynamic() {
-    return <MapNoSSR />;
+    return (
+        <div className="w-full h-full min-h-[420px]">
+            <MapNoSSR />
+        </div>
+    );
 }

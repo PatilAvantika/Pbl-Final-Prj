@@ -9,6 +9,7 @@ import { TasksModule } from './tasks/tasks.module';
 import { AttendanceModule } from './attendance/attendance.module';
 import { ReportsModule } from './reports/reports.module';
 import { HrModule } from './hr/hr.module';
+import { AuditModule } from './audit/audit.module';
 
 @Module({
   imports: [
@@ -19,7 +20,8 @@ import { HrModule } from './hr/hr.module';
     TasksModule,
     AttendanceModule,
     ReportsModule,
-    HrModule
+    HrModule,
+    AuditModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -1,5 +1,7 @@
 import { HrService } from './hr.service';
 import { LeaveStatus, LeaveType } from '@prisma/client';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { AuditService } from '../audit/audit.service';
 export declare class RequestLeaveDto {
     type: LeaveType;
     startDate: string | Date;
@@ -9,43 +11,54 @@ export declare class RequestLeaveDto {
 export declare class UpdateLeaveStatusDto {
     status: LeaveStatus;
 }
+export declare class LeaveListQueryDto extends PaginationQueryDto {
+    status?: LeaveStatus;
+    userId?: string;
+}
+export declare class PayslipListQueryDto extends PaginationQueryDto {
+    userId?: string;
+    year?: number;
+    month?: number;
+}
 export declare class HrController {
     private readonly hrService;
-    constructor(hrService: HrService);
+    private readonly auditService;
+    constructor(hrService: HrService, auditService: AuditService);
     requestLeave(req: any, data: RequestLeaveDto): Promise<{
         id: string;
-        type: import("@prisma/client").$Enums.LeaveType;
         userId: string;
+        type: import("@prisma/client").$Enums.LeaveType;
+        status: import("@prisma/client").$Enums.LeaveStatus;
         startDate: Date;
         endDate: Date;
-        status: import("@prisma/client").$Enums.LeaveStatus;
         reason: string;
     }>;
     getMyLeaves(req: any): Promise<{
         id: string;
-        type: import("@prisma/client").$Enums.LeaveType;
         userId: string;
+        type: import("@prisma/client").$Enums.LeaveType;
+        status: import("@prisma/client").$Enums.LeaveStatus;
         startDate: Date;
         endDate: Date;
-        status: import("@prisma/client").$Enums.LeaveStatus;
         reason: string;
     }[]>;
-    getAllLeaves(): Promise<{
+    getAllLeaves(query: LeaveListQueryDto): Promise<{
         id: string;
-        type: import("@prisma/client").$Enums.LeaveType;
         userId: string;
+        type: import("@prisma/client").$Enums.LeaveType;
+        status: import("@prisma/client").$Enums.LeaveStatus;
         startDate: Date;
         endDate: Date;
-        status: import("@prisma/client").$Enums.LeaveStatus;
         reason: string;
     }[]>;
-    updateLeaveStatus(leaveId: string, data: UpdateLeaveStatusDto): Promise<{
+    cancelLeave(leaveId: string, req: any): Promise<void>;
+    updateLeaveStatus(leaveId: string, data: UpdateLeaveStatusDto, req: any): Promise<{
         id: string;
-        type: import("@prisma/client").$Enums.LeaveType;
         userId: string;
+        type: import("@prisma/client").$Enums.LeaveType;
+        status: import("@prisma/client").$Enums.LeaveStatus;
         startDate: Date;
         endDate: Date;
-        status: import("@prisma/client").$Enums.LeaveStatus;
         reason: string;
     }>;
     getMyPayslips(req: any): Promise<{
@@ -62,7 +75,7 @@ export declare class HrController {
         netPay: number;
         pdfUrl: string | null;
     }[]>;
-    getAllPayslips(): Promise<{
+    getAllPayslips(query: PayslipListQueryDto): Promise<{
         id: string;
         userId: string;
         month: number;
@@ -76,7 +89,7 @@ export declare class HrController {
         netPay: number;
         pdfUrl: string | null;
     }[]>;
-    generatePayslip(userId: string, year: number, month: number): Promise<{
+    generatePayslip(userId: string, year: number, month: number, req: any): Promise<{
         id: string;
         userId: string;
         month: number;

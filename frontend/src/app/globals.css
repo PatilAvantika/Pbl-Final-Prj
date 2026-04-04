@@ -9,6 +9,18 @@
   --font-sans: var(--font-inter);
 }
 
+/* ── Scrollbar utilities ─────────────────────────────────── */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* ── Volunteer portal ─────────────────────────────────────── */
+.vol-card {
+  background: white;
+  border-radius: 1rem;
+  border: 1px solid rgba(0,0,0,0.06);
+  box-shadow: 0 2px 12px rgba(0,0,0,0.05);
+}
+
 /* Linear/Stripe style utilities */
 .glassmorphism {
   background: rgba(255, 255, 255, 0.7);
@@ -47,4 +59,57 @@
 
 .animation-delay-4000 {
   animation-delay: 4s;
+}
+
+@keyframes gradient-pan {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+@keyframes float-orb {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(0, -12px, 0) scale(1.05);
+  }
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+.landing-gradient-bg {
+  background: linear-gradient(120deg, #f0fdfa, #ecfeff, #eef2ff, #f5f3ff, #f0fdfa);
+  background-size: 300% 300%;
+  animation: gradient-pan 18s ease infinite;
+}
+
+.landing-orb {
+  animation: float-orb 6s ease-in-out infinite;
+}
+
+@keyframes sparkle-shift {
+  0% {
+    transform: translateY(0) scale(1);
+    opacity: 0.4;
+  }
+  50% {
+    transform: translateY(-10px) scale(1.15);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(0) scale(1);
+    opacity: 0.4;
+  }
+}
+
+.landing-sparkle {
+  animation: sparkle-shift 4s ease-in-out infinite;
 }

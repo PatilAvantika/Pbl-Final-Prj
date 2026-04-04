@@ -1,43 +1,104 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import api from '../../../lib/axios';
 import { Users, FileText, CheckCircle, XCircle, Clock, AlertCircle } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useAuth } from '../../../context/AuthContext';
+import { hasPermission } from '../../../lib/permissions';
 
 export default function HrDashboardPage() {
+    const { user } = useAuth();
+    const canManagePayroll = hasPermission(user?.role, 'managePayroll');
     const [activeTab, setActiveTab] = useState<'leaves' | 'payslips'>('leaves');
-    const [leaves, setLeaves] = useState([]);
-    const [payslips, setPayslips] = useState([]);
-    const [loading, setLoading] = useState(true);
+    const [payrollUserId, setPayrollUserId] = useState('');
+    const [payrollMonth, setPayrollMonth] = useState(new Date().getMonth() + 1);
+    const [payrollYear, setPayrollYear] = useState(new Date().getFullYear());
+    const [payslipFilterMonth, setPayslipFilterMonth] = useState('ALL');
+    const [payslipFilterYear, setPayslipFilterYear] = useState('ALL');
+    const queryClient = useQueryClient();
 
-    useEffect(() => {
-        fetchData();
-    }, [activeTab]);
+    const { data: leaves = [], isLoading: loadingLeaves } = useQuery({
+        queryKey: ['hr-leaves'],
+        queryFn: async () => (await api.get('/hr/leaves/all?limit=200')).data,
+        enabled: activeTab === 'leaves',
+    });
 
-    const fetchData = async () => {
-        setLoading(true);
-        try {
-            if (activeTab === 'leaves') {
-                const res = await api.get('/hr/leaves/all');
-                setLeaves(res.data);
-            } else {
-                const res = await api.get('/hr/payslips/all');
-                setPayslips(res.data);
-            }
-        } catch (err) {
-            console.error("Failed to fetch HR data", err);
-        } finally {
-            setLoading(false);
-        }
-    };
+    const { data: payslips = [], isLoading: loadingPayslips } = useQuery({
+        queryKey: ['hr-payslips', payslipFilterMonth, payslipFilterYear],
+        queryFn: async () => {
+            const params = new URLSearchParams({ limit: '200' });
+            if (payslipFilterMonth !== 'ALL') params.set('month', payslipFilterMonth);
+            if (payslipFilterYear !== 'ALL') params.set('year', payslipFilterYear);
+            return (await api.get(`/hr/payslips/all?${params.toString()}`)).data;
+        },
+        enabled: activeTab === 'payslips',
+    });
+
+    const loading = activeTab === 'leaves' ? loadingLeaves : loadingPayslips;
+
+    const updateLeaveMutation = useMutation({
+        mutationFn: async ({ id, status }: { id: string; status: 'APPROVED' | 'REJECTED' }) =>
+            api.put(`/hr/leaves/${id}/status`, { status }),
+        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['hr-leaves'] }),
+    });
 
     const handleLeaveStatusUpdate = async (id: string, status: 'APPROVED' | 'REJECTED') => {
         try {
-            await api.put(`/hr/leaves/${id}/status`, { status });
-            fetchData();
+            await updateLeaveMutation.mutateAsync({ id, status });
         } catch (err) {
             alert("Failed to update status");
         }
+    };
+
+    const handleViewPayslip = (pdfUrl?: string) => {
+        if (!pdfUrl) {
+            alert('PDF is not generated for this payslip yet.');
+            return;
+        }
+        window.open(pdfUrl, '_blank', 'noopener,noreferrer');
+    };
+
+    const handleGeneratePayslip = async () => {
+        if (!payrollUserId.trim()) {
+            alert('Please provide user id for generation');
+            return;
+        }
+        try {
+            await api.post(`/hr/payslips/generate/${payrollUserId.trim()}/${payrollYear}/${payrollMonth}`);
+            queryClient.invalidateQueries({ queryKey: ['hr-payslips'] });
+            alert('Payslip generated successfully');
+        } catch (err) {
+            alert('Failed to generate payslip');
+        }
+    };
+
+    const exportPayslipsCsv = () => {
+        if (!payslips.length) {
+            alert('No payslip data to export');
+            return;
+        }
+        const header = ['StaffName', 'Role', 'Month', 'Year', 'AttendanceDays', 'Absences', 'BaseSalary', 'Deductions', 'NetPay', 'PdfUrl'];
+        const rows = payslips.map((slip: any) => [
+            `"${(slip.user?.firstName || '')} ${(slip.user?.lastName || '')}"`,
+            slip.user?.role || '',
+            slip.month,
+            slip.year,
+            slip.attendanceDays,
+            slip.absences,
+            slip.baseSalary,
+            slip.deductions,
+            slip.netPay,
+            slip.pdfUrl || '',
+        ]);
+        const csv = [header.join(','), ...rows.map((row: any[]) => row.join(','))].join('\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `payslips-${Date.now()}.csv`;
+        link.click();
+        URL.revokeObjectURL(url);
     };
 
     return (
@@ -132,6 +193,51 @@ export default function HrDashboardPage() {
                 </div>
             ) : (
                 <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+                    {canManagePayroll && (
+                        <div className="p-4 border-b border-slate-100 grid grid-cols-1 lg:grid-cols-5 gap-3">
+                        <input
+                            value={payrollUserId}
+                            onChange={(e) => setPayrollUserId(e.target.value)}
+                            placeholder="User ID for manual generation"
+                            className="px-3 py-2 rounded-xl border border-slate-200 text-sm"
+                        />
+                        <input
+                            type="number"
+                            min={1}
+                            max={12}
+                            value={payrollMonth}
+                            onChange={(e) => setPayrollMonth(parseInt(e.target.value || '1'))}
+                            className="px-3 py-2 rounded-xl border border-slate-200 text-sm"
+                        />
+                        <input
+                            type="number"
+                            min={2000}
+                            value={payrollYear}
+                            onChange={(e) => setPayrollYear(parseInt(e.target.value || String(new Date().getFullYear())))}
+                            className="px-3 py-2 rounded-xl border border-slate-200 text-sm"
+                        />
+                        <button onClick={handleGeneratePayslip} className="px-3 py-2 rounded-xl bg-emerald-600 text-white text-sm font-bold">
+                            Generate Payslip
+                        </button>
+                        <button onClick={exportPayslipsCsv} className="px-3 py-2 rounded-xl bg-slate-800 text-white text-sm font-bold">
+                            Export CSV
+                        </button>
+                        </div>
+                    )}
+                    <div className="px-4 pb-4 pt-2 border-b border-slate-100 flex items-center gap-3">
+                        <select value={payslipFilterMonth} onChange={(e) => setPayslipFilterMonth(e.target.value)} className="px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-sm font-semibold text-slate-700">
+                            <option value="ALL">All Months</option>
+                            {Array.from({ length: 12 }).map((_, idx) => (
+                                <option key={idx + 1} value={String(idx + 1)}>{idx + 1}</option>
+                            ))}
+                        </select>
+                        <select value={payslipFilterYear} onChange={(e) => setPayslipFilterYear(e.target.value)} className="px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-sm font-semibold text-slate-700">
+                            <option value="ALL">All Years</option>
+                            {[new Date().getFullYear(), new Date().getFullYear() - 1, new Date().getFullYear() - 2].map((year) => (
+                                <option key={year} value={String(year)}>{year}</option>
+                            ))}
+                        </select>
+                    </div>
                     <div className="overflow-x-auto">
                         <table className="w-full text-left border-collapse">
                             <thead>
@@ -176,7 +282,7 @@ export default function HrDashboardPage() {
                                             <span className="text-slate-800 font-extrabold bg-slate-100 px-3 py-1 rounded border border-slate-200">₹{slip.netPay.toLocaleString()}</span>
                                         </td>
                                         <td className="px-6 py-4 text-right">
-                                            <button className="text-emerald-600 hover:text-emerald-700 font-bold text-xs flex items-center justify-end space-x-1 group ml-auto">
+                                            <button onClick={() => handleViewPayslip(slip.pdfUrl)} className="text-emerald-600 hover:text-emerald-700 font-bold text-xs flex items-center justify-end space-x-1 group ml-auto">
                                                 <FileText className="w-4 h-4 group-hover:-translate-y-0.5 transition-transform" />
                                                 <span>View PDF</span>
                                             </button>

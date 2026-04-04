@@ -67,21 +67,41 @@ let UsersService = class UsersService {
             },
         });
     }
-    async findAll() {
-        return this.prisma.user.findMany();
+    async findAll(query) {
+        const page = query?.page ?? 1;
+        const limit = query?.limit ?? 20;
+        const skip = (page - 1) * limit;
+        const users = await this.prisma.user.findMany({
+            where: {
+                role: query?.role,
+                isActive: query?.isActive !== undefined ? query.isActive === 'true' : undefined,
+                OR: query?.search
+                    ? [
+                        { email: { contains: query.search, mode: 'insensitive' } },
+                        { firstName: { contains: query.search, mode: 'insensitive' } },
+                        { lastName: { contains: query.search, mode: 'insensitive' } },
+                    ]
+                    : undefined,
+            },
+            orderBy: { createdAt: 'desc' },
+            skip,
+            take: limit,
+        });
+        return users.map(({ passwordHash, ...safeUser }) => safeUser);
     }
     async findOne(id) {
         const user = await this.prisma.user.findUnique({ where: { id } });
         if (!user) {
             throw new common_1.NotFoundException('User not found');
         }
-        return user;
+        const { passwordHash, ...safeUser } = user;
+        return safeUser;
     }
     async findByEmail(email) {
         return this.prisma.user.findUnique({ where: { email } });
     }
     async update(id, data) {
-        const user = await this.findOne(id);
+        const user = await this.prisma.user.findUnique({ where: { id } });
         if (!user) {
             throw new common_1.NotFoundException('User not found');
         }
@@ -89,14 +109,21 @@ let UsersService = class UsersService {
             const salt = await bcrypt.genSalt(10);
             data.passwordHash = await bcrypt.hash(data.passwordHash, salt);
         }
-        return this.prisma.user.update({
+        const updatedUser = await this.prisma.user.update({
             where: { id },
             data,
         });
+        const { passwordHash, ...safeUser } = updatedUser;
+        return safeUser;
     }
     async remove(id) {
-        await this.findOne(id);
-        return this.prisma.user.delete({ where: { id } });
+        const user = await this.prisma.user.findUnique({ where: { id } });
+        if (!user) {
+            throw new common_1.NotFoundException('User not found');
+        }
+        const deletedUser = await this.prisma.user.delete({ where: { id } });
+        const { passwordHash, ...safeUser } = deletedUser;
+        return safeUser;
     }
 };
 exports.UsersService = UsersService;

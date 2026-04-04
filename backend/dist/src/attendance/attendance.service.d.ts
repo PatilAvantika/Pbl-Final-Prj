@@ -1,5 +1,6 @@
 import { PrismaService } from '../prisma/prisma.service';
 import { TasksService } from '../tasks/tasks.service';
+import { Role } from '@prisma/client';
 export declare class ClockInDto {
     taskId: string;
     lat: number;
@@ -14,26 +15,44 @@ export declare class AttendanceService {
     private prisma;
     private tasksService;
     constructor(prisma: PrismaService, tasksService: TasksService);
-    clockIn(userId: string, data: ClockInDto): Promise<{
+    private dayBounds;
+    private validateTaskWindowAndGeofence;
+    clockIn(userId: string, role: Role, data: ClockInDto): Promise<{
         id: string;
-        deviceId: string;
+        userId: string;
+        taskId: string | null;
         timestamp: Date;
         type: string;
         lat: number;
         lng: number;
         accuracyMeters: number;
         reverseGeoName: string | null;
+        deviceId: string;
         imageHash: string | null;
         imageUrl: string | null;
         uniqueRequestId: string;
         syncStatus: import("@prisma/client").$Enums.SyncStatus;
-        taskId: string | null;
+    }>;
+    clockOut(userId: string, role: Role, data: ClockInDto): Promise<{
+        id: string;
         userId: string;
+        taskId: string | null;
+        timestamp: Date;
+        type: string;
+        lat: number;
+        lng: number;
+        accuracyMeters: number;
+        reverseGeoName: string | null;
+        deviceId: string;
+        imageHash: string | null;
+        imageUrl: string | null;
+        uniqueRequestId: string;
+        syncStatus: import("@prisma/client").$Enums.SyncStatus;
     }>;
     getMyAttendances(userId: string): Promise<({
         task: {
-            id: string;
             isActive: boolean;
+            id: string;
             title: string;
             description: string | null;
             template: import("@prisma/client").$Enums.TaskTemplate;
@@ -46,19 +65,19 @@ export declare class AttendanceService {
         } | null;
     } & {
         id: string;
-        deviceId: string;
+        userId: string;
+        taskId: string | null;
         timestamp: Date;
         type: string;
         lat: number;
         lng: number;
         accuracyMeters: number;
         reverseGeoName: string | null;
+        deviceId: string;
         imageHash: string | null;
         imageUrl: string | null;
         uniqueRequestId: string;
         syncStatus: import("@prisma/client").$Enums.SyncStatus;
-        taskId: string | null;
-        userId: string;
     })[]>;
     getAllAttendances(): Promise<({
         user: {
@@ -72,18 +91,18 @@ export declare class AttendanceService {
         } | null;
     } & {
         id: string;
-        deviceId: string;
+        userId: string;
+        taskId: string | null;
         timestamp: Date;
         type: string;
         lat: number;
         lng: number;
         accuracyMeters: number;
         reverseGeoName: string | null;
+        deviceId: string;
         imageHash: string | null;
         imageUrl: string | null;
         uniqueRequestId: string;
         syncStatus: import("@prisma/client").$Enums.SyncStatus;
-        taskId: string | null;
-        userId: string;
     })[]>;
 }

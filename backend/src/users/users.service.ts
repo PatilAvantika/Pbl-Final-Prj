@@ -2,6 +2,9 @@ import { Injectable, ConflictException, NotFoundException } from '@nestjs/common
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma, User, Role } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+import { UsersQueryDto } from './users.controller';
+
+type SafeUser = Omit<User, 'passwordHash'>;
 
 @Injectable()
 export class UsersService {
@@ -26,24 +29,46 @@ export class UsersService {
     });
   }
 
-  async findAll(): Promise<User[]> {
-    return this.prisma.user.findMany();
+  async findAll(query?: UsersQueryDto): Promise<SafeUser[]> {
+    const page = query?.page ?? 1;
+    const limit = query?.limit ?? 20;
+    const skip = (page - 1) * limit;
+
+    const users = await this.prisma.user.findMany({
+      where: {
+        role: query?.role,
+        isActive: query?.isActive !== undefined ? query.isActive === 'true' : undefined,
+        OR: query?.search
+          ? [
+              { email: { contains: query.search, mode: 'insensitive' } },
+              { firstName: { contains: query.search, mode: 'insensitive' } },
+              { lastName: { contains: query.search, mode: 'insensitive' } },
+            ]
+          : undefined,
+      },
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take: limit,
+    });
+
+    return users.map(({ passwordHash, ...safeUser }) => safeUser);
   }
 
-  async findOne(id: string): Promise<User> {
+  async findOne(id: string): Promise<SafeUser> {
     const user = await this.prisma.user.findUnique({ where: { id } });
     if (!user) {
       throw new NotFoundException('User not found');
     }
-    return user;
+    const { passwordHash, ...safeUser } = user;
+    return safeUser;
   }
 
   async findByEmail(email: string): Promise<User | null> {
     return this.prisma.user.findUnique({ where: { email } });
   }
 
-  async update(id: string, data: Prisma.UserUpdateInput): Promise<User> {
-    const user = await this.findOne(id);
+  async update(id: string, data: Prisma.UserUpdateInput): Promise<SafeUser> {
+    const user = await this.prisma.user.findUnique({ where: { id } });
     if (!user) {
       throw new NotFoundException('User not found');
     }
@@ -51,14 +76,21 @@ export class UsersService {
       const salt = await bcrypt.genSalt(10);
       data.passwordHash = await bcrypt.hash(data.passwordHash as string, salt);
     }
-    return this.prisma.user.update({
+    const updatedUser = await this.prisma.user.update({
       where: { id },
       data,
     });
+    const { passwordHash, ...safeUser } = updatedUser;
+    return safeUser;
   }
 
-  async remove(id: string): Promise<User> {
-    await this.findOne(id); // Check existence
-    return this.prisma.user.delete({ where: { id } });
+  async remove(id: string): Promise<SafeUser> {
+    const user = await this.prisma.user.findUnique({ where: { id } });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+    const deletedUser = await this.prisma.user.delete({ where: { id } });
+    const { passwordHash, ...safeUser } = deletedUser;
+    return safeUser;
   }
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Circle, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Circle } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { Loader2 } from 'lucide-react';
@@ -60,6 +60,7 @@ export default function LiveMap() {
     const [tasks, setTasks] = useState<Task[]>([]);
     const [attendances, setAttendances] = useState<Attendance[]>([]);
     const [loading, setLoading] = useState(true);
+    const [mapError, setMapError] = useState<string | null>(null);
 
     // Center on India broadly for default, or average of tasks
     const [center, setCenter] = useState<[number, number]>([20.5937, 78.9629]);
@@ -67,16 +68,21 @@ export default function LiveMap() {
     useEffect(() => {
         const fetchMapData = async () => {
             try {
-                const [tasksRes, attendRes] = await Promise.all([
+                const [tasksResult, attendResult] = await Promise.allSettled([
                     api.get('/tasks'),
                     api.get('/attendance/all')
                 ]);
 
-                const fetchedTasks = tasksRes.data;
-                const fetchedAttendances = attendRes.data;
+                const fetchedTasks = tasksResult.status === 'fulfilled' ? tasksResult.value.data : [];
+                const fetchedAttendances = attendResult.status === 'fulfilled' ? attendResult.value.data : [];
 
                 setTasks(fetchedTasks);
                 setAttendances(fetchedAttendances);
+                setMapError(
+                    tasksResult.status === 'rejected' || attendResult.status === 'rejected'
+                        ? 'Some live map data could not be loaded.'
+                        : null
+                );
 
                 if (fetchedTasks.length > 0) {
                     // Calculate center of first active task or just latest task
@@ -84,6 +90,7 @@ export default function LiveMap() {
                 }
             } catch (error) {
                 console.error("Error fetching map data", error);
+                setMapError('Unable to load live map data right now.');
             } finally {
                 setLoading(false);
             }
@@ -108,18 +115,19 @@ export default function LiveMap() {
     // Filter only active "CLOCK_IN" to show on map 
     // In a real scenario we would group by user and take latest status
     const activeUsers = attendances.filter(a => a.type === 'CLOCK_IN');
+    const hasMapData = tasks.length > 0 || activeUsers.length > 0;
 
     return (
-        <div className="w-full h-full relative rounded-3xl overflow-hidden border border-slate-200 shadow-sm z-10">
+        <div className="w-full h-full min-h-[420px] relative rounded-3xl overflow-hidden border border-slate-200 shadow-sm z-10">
             <MapContainer
                 center={center}
                 zoom={13}
-                style={{ height: '100%', width: '100%' }}
+                style={{ height: '100%', width: '100%', minHeight: 420 }}
                 scrollWheelZoom={true}
             >
                 <TileLayer
                     attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                    url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 />
 
                 {/* Draw Task Geofences */}
@@ -169,11 +177,11 @@ export default function LiveMap() {
                             <div className="p-1">
                                 <div className="flex items-center space-x-2 mb-2">
                                     <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center font-bold text-xs uppercase">
-                                        {att.user.firstName[0]}{att.user.lastName[0]}
+                                        {(att.user?.firstName?.[0] || 'U')}{(att.user?.lastName?.[0] || 'N')}
                                     </div>
                                     <div>
-                                        <h4 className="font-bold text-slate-800 text-sm">{att.user.firstName} {att.user.lastName}</h4>
-                                        <p className="text-xs text-slate-500 font-medium">{att.user.role.replace('_', ' ')}</p>
+                                        <h4 className="font-bold text-slate-800 text-sm">{att.user?.firstName || 'Unknown'} {att.user?.lastName || 'User'}</h4>
+                                        <p className="text-xs text-slate-500 font-medium">{att.user?.role?.replace('_', ' ') || 'Unknown Role'}</p>
                                     </div>
                                 </div>
                                 <div className="pt-2 border-t border-slate-100">
@@ -201,6 +209,18 @@ export default function LiveMap() {
                     {tasks.length} <span className="text-slate-400 font-medium">Zones</span>
                 </div>
             </div>
+
+            {mapError && (
+                <div className="absolute bottom-4 left-4 z-[400] bg-amber-50 border border-amber-200 text-amber-700 text-xs font-semibold px-3 py-2 rounded-lg shadow-sm">
+                    {mapError}
+                </div>
+            )}
+
+            {!mapError && !hasMapData && (
+                <div className="absolute bottom-4 right-4 z-[400] bg-slate-50 border border-slate-200 text-slate-600 text-xs font-semibold px-3 py-2 rounded-lg shadow-sm">
+                    No live geofence data yet. Create tasks and clock-ins to populate the map.
+                </div>
+            )}
         </div>
     );
 }

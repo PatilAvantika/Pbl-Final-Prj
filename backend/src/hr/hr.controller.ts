@@ -1,10 +1,15 @@
-import { Controller, Get, Post, Body, Param, Put, UseGuards, Request, ParseIntPipe } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Put, Delete, UseGuards, Request, ParseIntPipe, HttpCode, HttpStatus } from '@nestjs/common';
 import { HrService } from './hr.service';
-import { LeaveStatus, LeaveType } from '@prisma/client';
+import { AuditAction, LeaveStatus, LeaveType } from '@prisma/client';
 import { AuthGuard } from '@nestjs/passport';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { Role } from '@prisma/client';
+import { IsEnum, IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { Type } from 'class-transformer';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { Query } from '@nestjs/common';
+import { AuditService } from '../audit/audit.service';
 
 export class RequestLeaveDto {
     type: LeaveType;
@@ -14,13 +19,45 @@ export class RequestLeaveDto {
 }
 
 export class UpdateLeaveStatusDto {
+    @IsEnum(LeaveStatus)
     status: LeaveStatus;
+}
+
+export class LeaveListQueryDto extends PaginationQueryDto {
+    @IsOptional()
+    @IsEnum(LeaveStatus)
+    status?: LeaveStatus;
+
+    @IsOptional()
+    @IsString()
+    userId?: string;
+}
+
+export class PayslipListQueryDto extends PaginationQueryDto {
+    @IsOptional()
+    @IsString()
+    userId?: string;
+
+    @IsOptional()
+    @Type(() => Number)
+    @IsInt()
+    @Min(2000)
+    year?: number;
+
+    @IsOptional()
+    @Type(() => Number)
+    @IsInt()
+    @Min(1)
+    month?: number;
 }
 
 @UseGuards(AuthGuard('jwt'), RolesGuard)
 @Controller('hr')
 export class HrController {
-    constructor(private readonly hrService: HrService) { }
+    constructor(
+        private readonly hrService: HrService,
+        private readonly auditService: AuditService,
+    ) { }
 
     // --- LEAVES ---
     @Post('leaves')
@@ -40,14 +77,28 @@ export class HrController {
 
     @Roles(Role.SUPER_ADMIN, Role.HR_MANAGER, Role.NGO_ADMIN)
     @Get('leaves/all')
-    getAllLeaves() {
-        return this.hrService.getAllLeaves();
+    getAllLeaves(@Query() query: LeaveListQueryDto) {
+        return this.hrService.getAllLeaves(query);
+    }
+
+    @Delete('leaves/:id')
+    @HttpCode(HttpStatus.NO_CONTENT)
+    cancelLeave(@Param('id') leaveId: string, @Request() req: any) {
+        return this.hrService.cancelLeave(leaveId, req.user.id);
     }
 
     @Roles(Role.SUPER_ADMIN, Role.HR_MANAGER, Role.NGO_ADMIN)
     @Put('leaves/:id/status')
-    updateLeaveStatus(@Param('id') leaveId: string, @Body() data: UpdateLeaveStatusDto) {
-        return this.hrService.updateLeaveStatus(leaveId, data.status);
+    async updateLeaveStatus(@Param('id') leaveId: string, @Body() data: UpdateLeaveStatusDto, @Request() req: any) {
+        const leave = await this.hrService.updateLeaveStatus(leaveId, data.status);
+        await this.auditService.log({
+            actorId: req.user?.id,
+            action: AuditAction.LEAVE_STATUS_UPDATED,
+            entityType: 'Leave',
+            entityId: leaveId,
+            metadata: { status: data.status },
+        });
+        return leave;
     }
 
     // --- PAYROLL / PAYSLIPS ---
@@ -58,8 +109,8 @@ export class HrController {
 
     @Roles(Role.SUPER_ADMIN, Role.HR_MANAGER, Role.NGO_ADMIN)
     @Get('payslips/all')
-    getAllPayslips() {
-        return this.hrService.getAllPayslips();
+    getAllPayslips(@Query() query: PayslipListQueryDto) {
+        return this.hrService.getAllPayslips(query);
     }
 
     @Roles(Role.SUPER_ADMIN, Role.HR_MANAGER)
@@ -67,8 +118,18 @@ export class HrController {
     generatePayslip(
         @Param('userId') userId: string,
         @Param('year', ParseIntPipe) year: number,
-        @Param('month', ParseIntPipe) month: number
+        @Param('month', ParseIntPipe) month: number,
+        @Request() req: any,
     ) {
-        return this.hrService.generatePayslipForUser(userId, month, year);
+        return this.hrService.generatePayslipForUser(userId, month, year).then(async (payslip) => {
+            await this.auditService.log({
+                actorId: req.user?.id,
+                action: AuditAction.PAYSLIP_GENERATED,
+                entityType: 'Payslip',
+                entityId: payslip.id,
+                metadata: { userId, month, year },
+            });
+            return payslip;
+        });
     }
 }

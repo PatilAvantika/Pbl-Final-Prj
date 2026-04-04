@@ -12,6 +12,14 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.TasksService = void 0;
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../prisma/prisma.service");
+const client_1 = require("@prisma/client");
+const TASK_DETAIL_PRIVILEGED_ROLES = [
+    client_1.Role.SUPER_ADMIN,
+    client_1.Role.NGO_ADMIN,
+    client_1.Role.FIELD_COORDINATOR,
+    client_1.Role.HR_MANAGER,
+    client_1.Role.FINANCE_MANAGER,
+];
 let TasksService = class TasksService {
     prisma;
     constructor(prisma) {
@@ -20,12 +28,27 @@ let TasksService = class TasksService {
     async create(data) {
         return this.prisma.task.create({ data });
     }
-    async findAll() {
+    async findAll(query = {}) {
+        const page = query.page ?? 1;
+        const limit = query.limit ?? 20;
+        const skip = (page - 1) * limit;
         return this.prisma.task.findMany({
+            where: {
+                template: query.template,
+                isActive: query.isActive,
+                OR: query.search
+                    ? [
+                        { title: { contains: query.search, mode: 'insensitive' } },
+                        { zoneName: { contains: query.search, mode: 'insensitive' } },
+                    ]
+                    : undefined,
+            },
             include: {
                 _count: { select: { assignments: true, reports: true } }
             },
-            orderBy: { startTime: 'desc' }
+            orderBy: { startTime: 'desc' },
+            skip,
+            take: limit,
         });
     }
     async findOne(id) {
@@ -37,12 +60,47 @@ let TasksService = class TasksService {
             throw new common_1.NotFoundException('Task not found');
         return task;
     }
-    async findAssignedToUser(userId) {
-        const assignments = await this.prisma.taskAssignment.findMany({
-            where: { userId },
-            include: { task: true }
+    async findOneForRequester(id, requesterId, requesterRole) {
+        if (TASK_DETAIL_PRIVILEGED_ROLES.includes(requesterRole)) {
+            return this.findOne(id);
+        }
+        const task = await this.prisma.task.findUnique({
+            where: { id },
+            include: { assignments: { include: { user: { select: { id: true, firstName: true, lastName: true, role: true } } } } }
         });
-        return assignments.map(a => a.task);
+        if (!task)
+            throw new common_1.NotFoundException('Task not found');
+        const isAssigned = task.assignments.some((a) => a.userId === requesterId);
+        if (!isAssigned) {
+            throw new common_1.ForbiddenException('Task not found or access denied');
+        }
+        return task;
+    }
+    async findAssignedToUser(userId) {
+        const now = new Date();
+        const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+        const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+        const assignments = await this.prisma.taskAssignment.findMany({
+            where: {
+                userId,
+                task: {
+                    isActive: true,
+                    startTime: { lte: endOfDay },
+                    endTime: { gte: startOfDay },
+                },
+            },
+            include: { task: true },
+            orderBy: { task: { startTime: 'asc' } },
+        });
+        return assignments.map((a) => a.task);
+    }
+    async assertUserAssignedToTask(userId, taskId) {
+        const assignment = await this.prisma.taskAssignment.findUnique({
+            where: { userId_taskId: { userId, taskId } },
+        });
+        if (!assignment) {
+            throw new common_1.ForbiddenException('You are not assigned to this task');
+        }
     }
     async assignUserToTask(taskId, userId) {
         await this.findOne(taskId);

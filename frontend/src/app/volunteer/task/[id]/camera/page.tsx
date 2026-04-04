@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, use } from 'react';
-import { Camera, RefreshCcw, Check, ArrowRight, Loader2, X, AlertCircle } from 'lucide-react';
+import { Camera, RefreshCcw, Check, Loader2, X, AlertCircle } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import api from '../../../../../lib/axios';
 import { useAuth } from '../../../../../context/AuthContext';

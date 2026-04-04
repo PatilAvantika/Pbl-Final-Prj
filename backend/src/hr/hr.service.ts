@@ -1,7 +1,22 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Leave, LeaveStatus, LeaveType, Payslip, Prisma } from '@prisma/client';
 import { Cron, CronExpression } from '@nestjs/schedule';
+
+interface LeaveListQuery {
+    page?: number;
+    limit?: number;
+    status?: LeaveStatus;
+    userId?: string;
+}
+
+interface PayslipListQuery {
+    page?: number;
+    limit?: number;
+    userId?: string;
+    year?: number;
+    month?: number;
+}
 
 @Injectable()
 export class HrService {
@@ -29,6 +44,16 @@ export class HrService {
         });
     }
 
+    async cancelLeave(leaveId: string, userId: string): Promise<void> {
+        const leave = await this.prisma.leave.findUnique({ where: { id: leaveId } });
+        if (!leave) throw new NotFoundException('Leave request not found');
+        if (leave.userId !== userId) throw new ForbiddenException('Not your leave request');
+        if (leave.status !== 'PENDING') {
+            throw new BadRequestException('Only PENDING leave requests can be cancelled');
+        }
+        await this.prisma.leave.delete({ where: { id: leaveId } });
+    }
+
     async getMyLeaves(userId: string): Promise<Leave[]> {
         return this.prisma.leave.findMany({
             where: { userId },
@@ -36,10 +61,19 @@ export class HrService {
         });
     }
 
-    async getAllLeaves(): Promise<Leave[]> {
+    async getAllLeaves(query: LeaveListQuery = {}): Promise<Leave[]> {
+        const page = query.page ?? 1;
+        const limit = query.limit ?? 20;
+        const skip = (page - 1) * limit;
         return this.prisma.leave.findMany({
+            where: {
+                status: query.status,
+                userId: query.userId,
+            },
             include: { user: { select: { firstName: true, lastName: true, email: true, role: true } } },
-            orderBy: { startDate: 'desc' }
+            orderBy: { startDate: 'desc' },
+            skip,
+            take: limit,
         });
     }
 
@@ -128,10 +162,20 @@ export class HrService {
         });
     }
 
-    async getAllPayslips(): Promise<Payslip[]> {
+    async getAllPayslips(query: PayslipListQuery = {}): Promise<Payslip[]> {
+        const page = query.page ?? 1;
+        const limit = query.limit ?? 20;
+        const skip = (page - 1) * limit;
         return this.prisma.payslip.findMany({
+            where: {
+                userId: query.userId,
+                year: query.year,
+                month: query.month,
+            },
             include: { user: { select: { firstName: true, lastName: true, role: true } } },
-            orderBy: [{ year: 'desc' }, { month: 'desc' }]
+            orderBy: [{ year: 'desc' }, { month: 'desc' }],
+            skip,
+            take: limit,
         })
     }
 }

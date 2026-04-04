@@ -1,19 +1,51 @@
 'use client';
 
-import React, { useState } from 'react';
-import { useAuth } from '../../../context/AuthContext';
-import { useRouter } from 'next/navigation';
+import React, { Suspense, useEffect, useMemo, useState } from 'react';
+import { Role, useAuth } from '../../../context/AuthContext';
+import { useSearchParams } from 'next/navigation';
 import api from '../../../lib/axios';
 import Link from 'next/link';
 import { Mail, Lock, ArrowRight, AlertCircle, Loader2 } from 'lucide-react';
 
-export default function LoginPage() {
+function LoginPageContent() {
     const [email, setEmail] = useState('testuser1@gmail.com');
     const [password, setPassword] = useState('password');
     const [error, setError] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const { login } = useAuth();
-    const router = useRouter();
+    const searchParams = useSearchParams();
+    const selectedPortal = searchParams.get('role');
+
+    const portalConfig = useMemo(() => {
+        const byPortal: Record<string, { title: string; allowedRoles: Role[]; email: string; password: string }> = {
+            admin: {
+                title: 'Admin Login',
+                allowedRoles: ['SUPER_ADMIN', 'NGO_ADMIN', 'FIELD_COORDINATOR', 'HR_MANAGER', 'FINANCE_MANAGER', 'TEAM_LEADER'],
+                email: 'admin@fieldops.demo',
+                password: 'password123'
+            },
+            volunteer: {
+                title: 'Volunteer Login',
+                allowedRoles: ['VOLUNTEER'],
+                email: 'volunteer@fieldops.demo',
+                password: 'password123'
+            },
+            staff: {
+                title: 'Staff Login',
+                allowedRoles: ['STAFF'],
+                email: 'staff@fieldops.demo',
+                password: 'password123'
+            }
+        };
+        return selectedPortal ? byPortal[selectedPortal] : null;
+    }, [selectedPortal]);
+
+    useEffect(() => {
+        if (portalConfig) {
+            setEmail(portalConfig.email);
+            setPassword(portalConfig.password);
+        }
+    }, [portalConfig]);
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -23,6 +55,10 @@ export default function LoginPage() {
         try {
             const response = await api.post('/auth/login', { email, password });
             const { access_token, user } = response.data;
+            if (portalConfig && !portalConfig.allowedRoles.includes(user.role)) {
+                setError(`This account is not allowed in ${portalConfig.title}. Please use the correct portal.`);
+                return;
+            }
             login(access_token, user);
             // Redirection is handled in login context based on role
         } catch (err: any) {
@@ -45,8 +81,12 @@ export default function LoginPage() {
                         <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-400 text-white mb-6 shadow-lg shadow-emerald-500/20 transform -rotate-6 hover:rotate-0 transition-transform duration-300">
                             <Lock className="w-8 h-8" />
                         </div>
-                        <h1 className="text-3xl font-extrabold text-slate-800 tracking-tight">Welcome Back</h1>
-                        <p className="text-slate-500 mt-2 font-medium">Log in to FieldOps Platform</p>
+                        <h1 className="text-3xl font-extrabold text-slate-800 tracking-tight">
+                            {portalConfig ? portalConfig.title : 'Welcome Back'}
+                        </h1>
+                        <p className="text-slate-500 mt-2 font-medium">
+                            {portalConfig ? 'Sign in with your role-specific account' : 'Log in to FieldOps Platform'}
+                        </p>
                     </div>
 
                     <form onSubmit={handleLogin} className="space-y-5">
@@ -116,8 +156,26 @@ export default function LoginPage() {
                             Request access
                         </Link>
                     </div>
+                    <div className="mt-4 text-center text-xs font-semibold text-slate-500">
+                        <Link href="/" className="hover:text-emerald-600 transition-colors">
+                            Back to Landing
+                        </Link>
+                    </div>
+                    {portalConfig && (
+                        <div className="mt-3 text-center text-xs text-slate-500 font-medium">
+                            Auto-filled demo credentials for this role.
+                        </div>
+                    )}
                 </div>
             </div>
         </div>
+    );
+}
+
+export default function LoginPage() {
+    return (
+        <Suspense fallback={<div className="min-h-screen w-full flex items-center justify-center bg-slate-50">Loading...</div>}>
+            <LoginPageContent />
+        </Suspense>
     );
 }

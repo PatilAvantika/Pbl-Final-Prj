@@ -15,7 +15,15 @@ export class AttendanceController {
         if (!data.lat || !data.lng || !data.taskId || !data.uniqueRequestId || !data.deviceId) {
             throw new BadRequestException('Missing required fields for geo-verified clock-in');
         }
-        return this.attendanceService.clockIn(req.user.id, data);
+        return this.attendanceService.clockIn(req.user.id, req.user.role, data);
+    }
+
+    @Post('clock-out')
+    async clockOut(@Request() req: any, @Body() data: ClockInDto) {
+        if (!data.lat || !data.lng || !data.taskId || !data.uniqueRequestId || !data.deviceId) {
+            throw new BadRequestException('Missing required fields for geo-verified clock-out');
+        }
+        return this.attendanceService.clockOut(req.user.id, req.user.role, data);
     }
 
     @Get('my-history')

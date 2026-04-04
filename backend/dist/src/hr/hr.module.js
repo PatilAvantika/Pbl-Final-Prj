@@ -12,12 +12,13 @@ const hr_service_1 = require("./hr.service");
 const hr_controller_1 = require("./hr.controller");
 const prisma_module_1 = require("../prisma/prisma.module");
 const users_module_1 = require("../users/users.module");
+const audit_module_1 = require("../audit/audit.module");
 let HrModule = class HrModule {
 };
 exports.HrModule = HrModule;
 exports.HrModule = HrModule = __decorate([
     (0, common_1.Module)({
-        imports: [prisma_module_1.PrismaModule, users_module_1.UsersModule],
+        imports: [prisma_module_1.PrismaModule, users_module_1.UsersModule, audit_module_1.AuditModule],
         controllers: [hr_controller_1.HrController],
         providers: [hr_service_1.HrService],
     })

@@ -20,7 +20,7 @@ export default function RootLayout({
     <html lang="en" className={inter.variable}>
       <body className="bg-[#FAF9F6] text-slate-800 font-sans antialiased selection:bg-emerald-500 selection:text-white">
         <ClientProviders>
-          <main className="min-h-screen flex flex-col items-center">
+          <main className="min-h-screen w-full flex flex-col">
             {children}
           </main>
         </ClientProviders>

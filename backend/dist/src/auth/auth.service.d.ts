@@ -1,6 +1,5 @@
 import { JwtService } from '@nestjs/jwt';
 import { UsersService } from '../users/users.service';
-import { PrismaService } from '../prisma/prisma.service';
 import { Role } from '@prisma/client';
 export interface JwtPayload {
     email: string;
@@ -10,8 +9,7 @@ export interface JwtPayload {
 export declare class AuthService {
     private usersService;
     private jwtService;
-    private prisma;
-    constructor(usersService: UsersService, jwtService: JwtService, prisma: PrismaService);
+    constructor(usersService: UsersService, jwtService: JwtService);
     validateUser(email: string, pass: string): Promise<any>;
     login(user: any): Promise<{
         access_token: string;
@@ -32,5 +30,15 @@ export declare class AuthService {
             firstName: any;
             lastName: any;
         };
+    }>;
+    getProfile(userId: string): Promise<{
+        isActive: boolean;
+        id: string;
+        deviceId: string | null;
+        createdAt: Date;
+        email: string;
+        role: import("@prisma/client").$Enums.Role;
+        firstName: string;
+        lastName: string;
     }>;
 }

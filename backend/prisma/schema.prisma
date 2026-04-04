@@ -47,6 +47,26 @@ enum SyncStatus {
   FAILED 
 }
 
+enum ReportStatus {
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
+enum AuditAction {
+  USER_CREATED
+  USER_UPDATED
+  USER_DELETED
+  TASK_CREATED
+  TASK_UPDATED
+  TASK_DELETED
+  TASK_ASSIGNED
+  TASK_UNASSIGNED
+  LEAVE_STATUS_UPDATED
+  REPORT_STATUS_UPDATED
+  PAYSLIP_GENERATED
+}
+
 // --- CORE ---
 model User {
   id            String    @id @default(uuid())
@@ -64,6 +84,9 @@ model User {
   tasks         TaskAssignment[]
   leaves        Leave[]
   payslips      Payslip[]
+  reports       FieldReport[] @relation("ReportAuthor")
+  approvedReports FieldReport[] @relation("ReportApprover")
+  auditLogs     AuditLog[]   @relation("AuditActor")
 }
 
 model Task {
@@ -131,8 +154,13 @@ model FieldReport {
   quantityItems   Int?     // e.g. bags of waste collected
   notes           String?
   timestamp       DateTime @default(now())
+  status          ReportStatus @default(SUBMITTED)
+  approvedById    String?
+  approvedAt      DateTime?
   
   task            Task     @relation(fields: [taskId], references: [id])
+  user            User     @relation("ReportAuthor", fields: [userId], references: [id])
+  approvedBy      User?    @relation("ReportApprover", fields: [approvedById], references: [id])
 }
 
 // --- HR & PAYROLL ---
@@ -164,4 +192,18 @@ model Payslip {
   
   user            User     @relation(fields: [userId], references: [id])
   @@unique([userId, month, year])
+}
+
+model AuditLog {
+  id         String      @id @default(uuid())
+  actorId    String?
+  action     AuditAction
+  entityType String
+  entityId   String
+  metadata   Json?
+  createdAt  DateTime    @default(now())
+
+  actor      User?       @relation("AuditActor", fields: [actorId], references: [id])
+
+  @@index([entityType, entityId, createdAt])
 }

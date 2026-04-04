@@ -1,9 +1,11 @@
 import { AuthService } from './auth.service';
-import { Prisma } from '@prisma/client';
+import { LoginDto, RegisterDto } from './dto/auth.dto';
+import type { Response } from 'express';
 export declare class AuthController {
     private authService;
     constructor(authService: AuthService);
-    login(body: any): Promise<{
+    private setAuthCookie;
+    login(body: LoginDto, res: Response): Promise<{
         access_token: string;
         user: {
             id: any;
@@ -13,7 +15,7 @@ export declare class AuthController {
             lastName: any;
         };
     }>;
-    register(body: Prisma.UserCreateInput): Promise<{
+    register(body: RegisterDto, res: Response): Promise<{
         access_token: string;
         user: {
             id: any;
@@ -23,5 +25,17 @@ export declare class AuthController {
             lastName: any;
         };
     }>;
-    getProfile(req: any): any;
+    getProfile(req: any): Promise<{
+        isActive: boolean;
+        id: string;
+        deviceId: string | null;
+        createdAt: Date;
+        email: string;
+        role: import("@prisma/client").$Enums.Role;
+        firstName: string;
+        lastName: string;
+    }>;
+    logout(res: Response): {
+        success: boolean;
+    };
 }

@@ -15,10 +15,22 @@ const passport_1 = require("@nestjs/passport");
 const common_1 = require("@nestjs/common");
 let JwtStrategy = class JwtStrategy extends (0, passport_1.PassportStrategy)(passport_jwt_1.Strategy) {
     constructor() {
+        const cookieExtractor = (req) => {
+            if (!req?.headers?.cookie)
+                return null;
+            const tokenCookie = req.headers.cookie
+                .split(';')
+                .map((v) => v.trim())
+                .find((v) => v.startsWith('token='));
+            return tokenCookie ? decodeURIComponent(tokenCookie.split('=')[1]) : null;
+        };
         super({
-            jwtFromRequest: passport_jwt_1.ExtractJwt.fromAuthHeaderAsBearerToken(),
+            jwtFromRequest: passport_jwt_1.ExtractJwt.fromExtractors([
+                passport_jwt_1.ExtractJwt.fromAuthHeaderAsBearerToken(),
+                cookieExtractor,
+            ]),
             ignoreExpiration: false,
-            secretOrKey: process.env.JWT_SECRET || 'super_secret',
+            secretOrKey: process.env.JWT_SECRET || 'dev_secret_change_me',
         });
     }
     async validate(payload) {

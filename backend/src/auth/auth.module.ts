@@ -13,8 +13,8 @@ import { PrismaModule } from '../prisma/prisma.module';
     forwardRef(() => UsersModule),
     PassportModule,
     JwtModule.register({
-      secret: process.env.JWT_SECRET || 'super_secret',
-      signOptions: { expiresIn: '60000m' }, // 1000h for dev simplicity
+      secret: process.env.JWT_SECRET || 'dev_secret_change_me',
+      signOptions: { expiresIn: (process.env.JWT_EXPIRES_IN || '60m') as any },
     }),
   ],
   controllers: [AuthController],

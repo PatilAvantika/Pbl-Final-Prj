@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
-import api from '../lib/axios';
+import api, { setApiToken } from '../lib/axios';
 
 // Define the User and AuthContext types
 export type Role =
@@ -40,14 +40,23 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const router = useRouter();
 
     useEffect(() => {
-        // Load auth state from local storage on initial render
-        const storedToken = localStorage.getItem('token');
         const storedUser = localStorage.getItem('user');
 
-        if (storedToken && storedUser) {
-            setToken(storedToken);
+        if (storedUser) {
             try {
-                setUser(JSON.parse(storedUser));
+                const parsedUser = JSON.parse(storedUser);
+                setUser(parsedUser);
+                api.get('/auth/profile')
+                    .then((res) => {
+                        setUser(res.data);
+                        localStorage.setItem('user', JSON.stringify(res.data));
+                    })
+                    .catch(() => {
+                        setUser(null);
+                        localStorage.removeItem('user');
+                    })
+                    .finally(() => setLoading(false));
+                return;
             } catch (e) {
                 console.error('Failed to parse user info', e);
             }
@@ -57,12 +66,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     const login = (newToken: string, userData: User) => {
         setToken(newToken);
+        setApiToken(newToken);
         setUser(userData);
-        localStorage.setItem('token', newToken);
         localStorage.setItem('user', JSON.stringify(userData));
-
-        // Sync to cookie for Next.js Middleware Edge interception
-        document.cookie = `token=${newToken}; path=/; max-age=86400; SameSite=Strict; Secure`;
 
         // Determine dashboard redirection based on role
         if (userData.role === 'SUPER_ADMIN' || userData.role === 'NGO_ADMIN') {
@@ -75,13 +81,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     };
 
     const logout = () => {
+        api.post('/auth/logout').catch(() => null);
+        setApiToken(null);
         setToken(null);
         setUser(null);
-        localStorage.removeItem('token');
         localStorage.removeItem('user');
-
-        // Wipe cookie
-        document.cookie = 'token=; Max-Age=0; path=/;';
 
         router.push('/login');
     };

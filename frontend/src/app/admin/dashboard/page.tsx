@@ -1,65 +1,54 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import MapDynamic from '../../../components/MapDynamic';
 import api from '../../../lib/axios';
-import { Users, AlertTriangle, TrendingUp, CheckCircle2 } from 'lucide-react';
+import { Users, AlertTriangle, TrendingUp, CheckCircle2, Calendar } from 'lucide-react';
 import Link from 'next/link';
+import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
 
 export default function AdminDashboardPage() {
-    const [stats, setStats] = useState({
-        activeTasks: 0,
-        volunteersOnField: 0,
-        reportsToday: 0,
-        issues: 0
+    const [fromDate, setFromDate] = useState(new Date(Date.now() - 1000 * 60 * 60 * 24 * 30).toISOString().slice(0, 10));
+    const [toDate, setToDate] = useState(new Date().toISOString().slice(0, 10));
+    const { data, isLoading } = useQuery({
+        queryKey: ['admin-dashboard-stats', fromDate, toDate],
+        queryFn: async () => {
+            const response = await api.get(`/admin/metrics?from=${fromDate}&to=${toDate}`);
+            return response.data;
+        }
     });
 
-    useEffect(() => {
-        const fetchStats = async () => {
-            try {
-                const [tasksRes, attendRes, reportsRes] = await Promise.all([
-                    api.get('/tasks'),
-                    api.get('/attendance/all'),
-                    api.get('/reports')
-                ]);
-
-                // Simple mock calculations for stats
-                const now = new Date();
-                const activeTasks = tasksRes.data.filter((t: any) =>
-                    new Date(t.startTime) <= now && new Date(t.endTime) >= now
-                ).length;
-
-                // Count unique users who clocked in today but no clock out
-                const activeVols = new Set(
-                    attendRes.data
-                        .filter((a: any) => a.type === 'CLOCK_IN')
-                        .map((a: any) => a.user.id)
-                ).size;
-
-                setStats({
-                    activeTasks,
-                    volunteersOnField: activeVols,
-                    reportsToday: reportsRes.data.length, // Simplified
-                    issues: 2 // Mock issue metric
-                });
-
-            } catch (err) {
-                console.error("Failed to fetch dash stats", err);
-            }
-        };
-
-        fetchStats();
-    }, []);
+    const stats = data?.kpis || {
+        activeTasks: 0,
+        volunteersOnField: 0,
+        reportsPending: 0,
+        reportsInRange: 0,
+        leavePending: 0,
+        payslipsInRange: 0,
+        syncFailures: 0,
+    };
+    const recentActivity = data?.recentActivity || [];
 
     return (
         <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className="bg-white rounded-2xl border border-slate-200 p-4 flex flex-col lg:flex-row gap-3 items-center">
+                <div className="flex items-center text-slate-600 font-bold text-sm mr-auto">
+                    <Calendar className="w-4 h-4 mr-2" />
+                    KPI Date Range
+                </div>
+                <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-sm" />
+                <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-sm" />
+            </div>
+            {isLoading && (
+                <div className="text-sm font-semibold text-slate-500">Loading dashboard metrics...</div>
+            )}
 
             {/* Top Stat Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                <StatCard title="Active Field Tasks" value={stats.activeTasks} icon={<TrendingUp className="w-5 h-5 text-sky-500 border" />} trend="+2 Today" color="sky" />
-                <StatCard title="Volunteers Assigned" value={stats.volunteersOnField} icon={<Users className="w-5 h-5 text-emerald-500" />} trend="Live Now" color="emerald" />
-                <StatCard title="Reports Logged" value={stats.reportsToday} icon={<CheckCircle2 className="w-5 h-5 text-indigo-500" />} trend="14 Pending Approval" color="indigo" />
-                <StatCard title="Alerts & Issues" value={stats.issues} icon={<AlertTriangle className="w-5 h-5 text-orange-500" />} trend="Requires Attention" color="orange" />
+                <StatCard title="Active Field Tasks" value={stats.activeTasks} icon={<TrendingUp className="w-5 h-5 text-sky-500 border" />} trend="Drilldown: Tasks" color="sky" href="/admin/tasks" />
+                <StatCard title="Volunteers On Field" value={stats.volunteersOnField} icon={<Users className="w-5 h-5 text-emerald-500" />} trend="Drilldown: Attendance" color="emerald" href="/admin/hr" />
+                <StatCard title="Reports Pending" value={stats.reportsPending} icon={<CheckCircle2 className="w-5 h-5 text-indigo-500" />} trend={`${stats.reportsInRange} in selected range`} color="indigo" href="/admin/reports" />
+                <StatCard title="Sync Failures" value={stats.syncFailures} icon={<AlertTriangle className="w-5 h-5 text-orange-500" />} trend="Requires Attention" color="orange" href="/admin/audit" />
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -80,27 +69,37 @@ export default function AdminDashboardPage() {
 
                     <div className="flex-1 bg-white rounded-3xl shadow-sm border border-slate-200 p-6">
                         <div className="flex items-center justify-between mb-6">
-                            <h2 className="text-lg font-extrabold text-slate-800 tracking-tight">Recent Activity</h2>
+                            <h2 className="text-lg font-extrabold text-slate-800 tracking-tight">Recent Admin Activity</h2>
                         </div>
 
                         <div className="space-y-6 relative before:absolute before:inset-0 before:ml-4 before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-slate-200 before:to-transparent">
-                            {/* Mock Timeline */}
-                            <TimelineItem title="Volunteer Clock-In" time="Just now" user="John Doe" task="Mumbai Beach Clean" color="emerald" />
-                            <TimelineItem title="Field Report Submitted" time="10 mins ago" user="Sarah Silva" task="Dharavi Survey" color="indigo" />
-                            <TimelineItem title="Geofence Violated" time="24 mins ago" user="Vikram M" task="Plantation Dr." color="red" />
-                            <TimelineItem title="Task Concluded" time="1 hour ago" user="System" task="Waste Collection A" color="sky" />
+                            {recentActivity.length === 0 && (
+                                <div className="text-sm text-slate-400">No recent activity in selected range.</div>
+                            )}
+                            {recentActivity.map((item: any) => (
+                                <TimelineItem
+                                    key={item.id}
+                                    title={String(item.action).replaceAll('_', ' ')}
+                                    time={new Date(item.createdAt).toLocaleString()}
+                                    user={item.actorName}
+                                    task={item.entityType}
+                                    color="indigo"
+                                />
+                            ))}
                         </div>
                     </div>
 
                     <div className="bg-gradient-to-br from-emerald-500 to-teal-600 rounded-3xl p-6 text-white shadow-lg shadow-emerald-500/20">
                         <h3 className="font-extrabold text-lg flex items-center mb-2">
                             <span className="w-2 h-2 rounded-full bg-white mr-2 animate-pulse"></span>
-                            Live Sync Enabled
+                            System Health
                         </h3>
-                        <p className="text-emerald-50 text-sm font-medium mb-6">The system is actively ingesting location telemetry and offline sync queues from field devices.</p>
-                        <button className="w-full bg-white text-emerald-600 hover:bg-emerald-50 font-bold py-2.5 rounded-xl transition-colors">
-                            View Logs
-                        </button>
+                        <p className="text-emerald-50 text-sm font-medium mb-6">
+                            Pending Leaves: {stats.leavePending} • Payslips in range: {stats.payslipsInRange}
+                        </p>
+                        <Link href="/admin/audit" className="w-full inline-flex items-center justify-center bg-white text-emerald-600 hover:bg-emerald-50 font-bold py-2.5 rounded-xl transition-colors">
+                            View Audit Logs
+                        </Link>
                     </div>
 
                 </div>
@@ -109,7 +108,7 @@ export default function AdminDashboardPage() {
     );
 }
 
-function StatCard({ title, value, icon, trend, color }: any) {
+function StatCard({ title, value, icon, trend, color, href }: any) {
     const colorMap: any = {
         sky: 'bg-sky-50 text-sky-600',
         emerald: 'bg-emerald-50 text-emerald-600',
@@ -125,7 +124,7 @@ function StatCard({ title, value, icon, trend, color }: any) {
                 </div>
             </div>
             <div className="text-4xl font-extrabold text-slate-800 tracking-tighter mb-2">{value}</div>
-            <div className="text-xs font-bold text-slate-400">{trend}</div>
+            <Link href={href} className="text-xs font-bold text-slate-400 hover:text-emerald-600">{trend}</Link>
         </div>
     );
 }

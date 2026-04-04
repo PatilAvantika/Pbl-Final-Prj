@@ -3,7 +3,7 @@
 import { ReactNode } from 'react';
 import ProtectedRoute from '../../components/ProtectedRoute';
 import { useAuth } from '../../context/AuthContext';
-import { Home, Users, Map, FileText, Settings, LogOut, ChevronRight, Briefcase } from 'lucide-react';
+import { Home, Users, Map, FileText, Settings, LogOut, ChevronRight, Briefcase, ShieldCheck } from 'lucide-react';
 import Link from 'next/link';
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
@@ -12,13 +12,15 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     const navItems = [
         { label: 'Dashboard', icon: Home, href: '/dashboard' },
         { label: 'Tasks & Geofences', icon: Map, href: '/tasks' },
-        { label: 'Users & HR', icon: Users, href: '/hr' },
+        { label: 'Users', icon: Users, href: '/users' },
+        { label: 'HR & Payroll', icon: Users, href: '/hr' },
         { label: 'Field Reports', icon: FileText, href: '/reports' },
+        { label: 'Audit', icon: ShieldCheck, href: '/audit' },
         { label: 'Settings', icon: Settings, href: '/settings' },
     ];
 
     return (
-        <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'NGO_ADMIN', 'FIELD_COORDINATOR']}>
+        <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'NGO_ADMIN', 'FIELD_COORDINATOR', 'HR_MANAGER', 'FINANCE_MANAGER']}>
             <div className="flex h-screen w-full bg-[#FAF9F6] overflow-hidden">
                 {/* Sidebar */}
                 <aside className="w-72 bg-white border-r border-slate-200 flex flex-col shadow-sm z-50">

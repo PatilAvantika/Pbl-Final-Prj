@@ -18,6 +18,7 @@ const tasks_module_1 = require("./tasks/tasks.module");
 const attendance_module_1 = require("./attendance/attendance.module");
 const reports_module_1 = require("./reports/reports.module");
 const hr_module_1 = require("./hr/hr.module");
+const audit_module_1 = require("./audit/audit.module");
 let AppModule = class AppModule {
 };
 exports.AppModule = AppModule;
@@ -31,7 +32,8 @@ exports.AppModule = AppModule = __decorate([
             tasks_module_1.TasksModule,
             attendance_module_1.AttendanceModule,
             reports_module_1.ReportsModule,
-            hr_module_1.HrModule
+            hr_module_1.HrModule,
+            audit_module_1.AuditModule,
         ],
         controllers: [app_controller_1.AppController],
         providers: [app_service_1.AppService],
