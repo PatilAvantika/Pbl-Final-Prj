@@ -1,0 +1,209 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// --- ENUMS ---
+enum Role { 
+  SUPER_ADMIN 
+  NGO_ADMIN 
+  HR_MANAGER 
+  FINANCE_MANAGER 
+  FIELD_COORDINATOR 
+  TEAM_LEADER 
+  VOLUNTEER 
+  STAFF 
+}
+
+enum TaskTemplate { 
+  WASTE_COLLECTION 
+  PLANTATION 
+  AWARENESS 
+  SURVEY 
+  TRAINING 
+}
+
+enum LeaveType { 
+  CASUAL 
+  SICK 
+  EARNED 
+  HALF_DAY 
+  UNPAID 
+  COMP_OFF 
+}
+
+enum LeaveStatus { 
+  PENDING 
+  APPROVED 
+  REJECTED 
+}
+
+enum SyncStatus { 
+  PENDING_SYNC 
+  SYNCED 
+  FAILED 
+}
+
+enum ReportStatus {
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
+enum AuditAction {
+  USER_CREATED
+  USER_UPDATED
+  USER_DELETED
+  TASK_CREATED
+  TASK_UPDATED
+  TASK_DELETED
+  TASK_ASSIGNED
+  TASK_UNASSIGNED
+  LEAVE_STATUS_UPDATED
+  REPORT_STATUS_UPDATED
+  PAYSLIP_GENERATED
+}
+
+// --- CORE ---
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  passwordHash  String
+  role          Role
+  firstName     String
+  lastName      String
+  deviceId      String?   // For duplicate detection
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  
+  // Relations
+  attendances   Attendance[]
+  tasks         TaskAssignment[]
+  leaves        Leave[]
+  payslips      Payslip[]
+  reports       FieldReport[] @relation("ReportAuthor")
+  approvedReports FieldReport[] @relation("ReportApprover")
+  auditLogs     AuditLog[]   @relation("AuditActor")
+}
+
+model Task {
+  id              String       @id @default(uuid())
+  title           String
+  description     String?
+  template        TaskTemplate
+  zoneName        String
+  geofenceLat     Float
+  geofenceLng     Float
+  geofenceRadius  Float        // in meters
+  startTime       DateTime
+  endTime         DateTime
+  isActive        Boolean      @default(true)
+  
+  // Relations
+  assignments     TaskAssignment[]
+  attendances     Attendance[]
+  reports         FieldReport[]
+}
+
+model TaskAssignment {
+  id        String   @id @default(uuid())
+  userId    String
+  taskId    String
+  user      User     @relation(fields: [userId], references: [id])
+  task      Task     @relation(fields: [taskId], references: [id])
+  
+  @@unique([userId, taskId])
+}
+
+// --- FIELD OPERATIONS ---
+model Attendance {
+  id               String     @id @default(uuid())
+  userId           String
+  taskId           String?    
+  timestamp        DateTime   @default(now())
+  type             String     // 'CLOCK_IN', 'CLOCK_OUT'
+  
+  // Geo-Intelligence
+  lat              Float
+  lng              Float
+  accuracyMeters   Float
+  reverseGeoName   String?
+  
+  // Device & Security
+  deviceId         String
+  imageHash        String?    @unique // Duplicate detection
+  imageUrl         String?
+  uniqueRequestId  String     @unique // Idempotency key
+  syncStatus       SyncStatus @default(SYNCED)
+  
+  user             User       @relation(fields: [userId], references: [id])
+  task             Task?      @relation(fields: [taskId], references: [id])
+
+  @@unique([userId, taskId, timestamp]) // Prevent double attendance for same task/day
+}
+
+model FieldReport {
+  id              String   @id @default(uuid())
+  taskId          String
+  userId          String
+  beforePhotoUrl  String?
+  afterPhotoUrl   String?
+  quantityItems   Int?     // e.g. bags of waste collected
+  notes           String?
+  timestamp       DateTime @default(now())
+  status          ReportStatus @default(SUBMITTED)
+  approvedById    String?
+  approvedAt      DateTime?
+  
+  task            Task     @relation(fields: [taskId], references: [id])
+  user            User     @relation("ReportAuthor", fields: [userId], references: [id])
+  approvedBy      User?    @relation("ReportApprover", fields: [approvedById], references: [id])
+}
+
+// --- HR & PAYROLL ---
+model Leave {
+  id        String      @id @default(uuid())
+  userId    String
+  type      LeaveType
+  startDate DateTime
+  endDate   DateTime
+  status    LeaveStatus @default(PENDING)
+  reason    String
+  
+  user      User        @relation(fields: [userId], references: [id])
+}
+
+model Payslip {
+  id              String   @id @default(uuid())
+  userId          String
+  month           Int
+  year            Int
+  baseSalary      Float
+  attendanceDays  Int
+  absences        Int
+  overtimeHours   Float
+  bonuses         Float
+  deductions      Float
+  netPay          Float
+  pdfUrl          String?
+  
+  user            User     @relation(fields: [userId], references: [id])
+  @@unique([userId, month, year])
+}
+
+model AuditLog {
+  id         String      @id @default(uuid())
+  actorId    String?
+  action     AuditAction
+  entityType String
+  entityId   String
+  metadata   Json?
+  createdAt  DateTime    @default(now())
+
+  actor      User?       @relation("AuditActor", fields: [actorId], references: [id])
+
+  @@index([entityType, entityId, createdAt])
+}
