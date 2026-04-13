@@ -2,11 +2,12 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import api from '../../../lib/axios';
-import { useAuth } from '../../../context/AuthContext';
+import api from '@/lib/api/client';
+import { getApiErrorMessage } from '@/lib/api-errors';
+import { useAuth, type User as AuthUser } from '@/context/AuthContext';
 import Link from 'next/link';
 import { Mail, Lock, User, Briefcase, ArrowRight, AlertCircle, Loader2 } from 'lucide-react';
-import { Role } from '../../../context/AuthContext';
+import type { Role } from '@/types/role';
 
 export default function RegisterPage() {
     const [formData, setFormData] = useState({
@@ -41,18 +42,26 @@ export default function RegisterPage() {
                 role: formData.role,
             };
 
-            const response = await api.post('/auth/register', payload);
-            const { access_token, user } = response.data;
-
-            // Auto-login after registration
-            login(access_token, user);
-        } catch (err: any) {
-            setError(
-                err.response?.data?.message ||
-                (err.response?.data?.message && Array.isArray(err.response.data.message)
-                    ? err.response.data.message.join(', ')
-                    : 'Registration failed. Please check your data.')
+            const response = await api.post<{ user: AuthUser }>('/auth/register', payload);
+            const user = response.data?.user;
+            if (!user?.id || !user?.role) {
+                setError(
+                    'Registration returned an incomplete profile. Try signing in, or contact support.',
+                );
+                return;
+            }
+            login(user);
+        } catch (err: unknown) {
+            const pc = (err as { response?: { data?: { prismaCode?: string } } }).response?.data
+                ?.prismaCode;
+            const prismaCode = typeof pc === 'string' ? pc : undefined;
+            const base = getApiErrorMessage(
+                err,
+                'Registration failed. If the problem persists, from the backend folder run: npx prisma migrate deploy',
             );
+            const suffix =
+                prismaCode && !base.includes(prismaCode) ? ` (${prismaCode})` : '';
+            setError(`${base}${suffix}`);
         } finally {
             setIsLoading(false);
         }
@@ -146,6 +155,7 @@ export default function RegisterPage() {
                                     required
                                 >
                                     <option value="VOLUNTEER">Volunteer</option>
+                                    <option value="DONOR">Donor</option>
                                     <option value="STAFF">Field Staff</option>
                                     <option value="TEAM_LEADER">Team Leader</option>
                                     <option value="FIELD_COORDINATOR">Field Coordinator</option>
@@ -176,6 +186,9 @@ export default function RegisterPage() {
                                     minLength={8}
                                 />
                             </div>
+                            <p className="text-[11px] text-slate-500 pl-1 mt-1">
+                                At least 8 characters, with at least one letter and one number.
+                            </p>
                         </div>
 
                         <button

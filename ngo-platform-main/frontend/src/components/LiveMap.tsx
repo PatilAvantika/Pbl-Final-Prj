@@ -1,224 +1,186 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Fragment, useMemo } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Circle } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import { Loader2 } from 'lucide-react';
-import api from '../lib/axios';
+import { useMapData } from '@/features/admin/hooks/useMapData';
 
-// Fix for default Leaflet markers in React
-const DefaultIcon = L.icon({
+/** Mumbai — default view when no tasks or volunteer points yet */
+const DEFAULT_CENTER: [number, number] = [19.076, 72.8777];
+const DEFAULT_ZOOM = 12;
+
+L.Icon.Default.mergeOptions({
+    iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
     iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
     shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-    iconSize: [25, 41],
-    iconAnchor: [12, 41],
-    popupAnchor: [1, -34],
-    tooltipAnchor: [16, -28],
-    shadowSize: [41, 41]
 });
-L.Marker.prototype.options.icon = DefaultIcon;
 
-// Custom active user icon
-const ActiveUserIcon = L.divIcon({
-    html: `<div class="w-4 h-4 rounded-full bg-emerald-500 border-2 border-white shadow-[0_0_10px_rgba(16,185,129,0.8)] animate-pulse"></div>`,
+const taskMarkerIcon = L.divIcon({
+    html: `<div style="width:14px;height:14px;border-radius:9999px;background:#2563eb;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.25)"></div>`,
+    className: '',
+    iconSize: [14, 14],
+    iconAnchor: [7, 7],
+});
+
+const volunteerIconActive = L.divIcon({
+    html: `<div style="width:16px;height:16px;border-radius:9999px;background:#10b981;border:2px solid #fff;box-shadow:0 0 10px rgba(16,185,129,0.65)"></div>`,
     className: '',
     iconSize: [16, 16],
     iconAnchor: [8, 8],
 });
 
-interface Task {
-    id: string;
-    title: string;
-    template: string;
-    zoneName: string;
-    geofenceLat: number;
-    geofenceLng: number;
-    geofenceRadius: number;
-    startTime: string;
-    endTime: string;
-}
+const volunteerIconIdle = L.divIcon({
+    html: `<div style="width:12px;height:12px;border-radius:9999px;background:#94a3b8;border:2px solid #fff;opacity:0.85"></div>`,
+    className: '',
+    iconSize: [12, 12],
+    iconAnchor: [6, 6],
+});
 
-interface Attendance {
-    id: string;
-    lat: number;
-    lng: number;
-    timestamp: string;
-    type: string;
-    user: {
-        firstName: string;
-        lastName: string;
-        role: string;
-    };
-    task: {
-        title: string;
-        zoneName: string;
-    };
+function MapSkeleton() {
+    return (
+        <div className="w-full h-full min-h-[420px] relative rounded-3xl overflow-hidden border border-slate-200 bg-slate-100 animate-pulse">
+            <div className="absolute inset-0 bg-gradient-to-br from-slate-200/80 via-slate-100 to-slate-200/60" />
+            <div className="absolute inset-8 rounded-2xl border border-dashed border-slate-300/80 bg-slate-50/50" />
+            <div className="absolute bottom-6 left-6 right-6 h-3 rounded-full bg-slate-200/90" />
+            <div className="absolute top-6 left-6 h-8 w-40 rounded-lg bg-slate-200/90" />
+            <p className="absolute inset-0 flex items-center justify-center text-sm font-bold tracking-wide text-slate-400">
+                Loading live geofence map…
+            </p>
+        </div>
+    );
 }
 
 export default function LiveMap() {
-    const [tasks, setTasks] = useState<Task[]>([]);
-    const [attendances, setAttendances] = useState<Attendance[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [mapError, setMapError] = useState<string | null>(null);
+    const { data, isLoading, isError, error, isFetching, dataUpdatedAt } = useMapData();
 
-    // Center on India broadly for default, or average of tasks
-    const [center, setCenter] = useState<[number, number]>([20.5937, 78.9629]);
+    const center = useMemo((): [number, number] => {
+        if (!data) return DEFAULT_CENTER;
+        if (data.tasks.length > 0) return [data.tasks[0].lat, data.tasks[0].lng];
+        if (data.volunteers.length > 0) return [data.volunteers[0].lat, data.volunteers[0].lng];
+        return DEFAULT_CENTER;
+    }, [data]);
 
-    useEffect(() => {
-        const fetchMapData = async () => {
-            try {
-                const [tasksResult, attendResult] = await Promise.allSettled([
-                    api.get('/tasks'),
-                    api.get('/attendance/all')
-                ]);
+    const tasks = data?.tasks ?? [];
+    const volunteers = data?.volunteers ?? [];
+    const hasPoints = tasks.length > 0 || volunteers.length > 0;
 
-                const fetchedTasks = tasksResult.status === 'fulfilled' ? tasksResult.value.data : [];
-                const fetchedAttendances = attendResult.status === 'fulfilled' ? attendResult.value.data : [];
-
-                setTasks(fetchedTasks);
-                setAttendances(fetchedAttendances);
-                setMapError(
-                    tasksResult.status === 'rejected' || attendResult.status === 'rejected'
-                        ? 'Some live map data could not be loaded.'
-                        : null
-                );
-
-                if (fetchedTasks.length > 0) {
-                    // Calculate center of first active task or just latest task
-                    setCenter([fetchedTasks[0].geofenceLat, fetchedTasks[0].geofenceLng]);
-                }
-            } catch (error) {
-                console.error("Error fetching map data", error);
-                setMapError('Unable to load live map data right now.');
-            } finally {
-                setLoading(false);
-            }
-        };
-
-        fetchMapData();
-
-        // Refresh every 30 seconds for "live" feel
-        const interval = setInterval(fetchMapData, 30000);
-        return () => clearInterval(interval);
-    }, []);
-
-    if (loading) {
-        return (
-            <div className="w-full h-full flex flex-col items-center justify-center bg-slate-100 rounded-3xl border border-slate-200">
-                <Loader2 className="w-8 h-8 text-emerald-500 animate-spin" />
-                <p className="mt-4 text-slate-500 font-medium tracking-wide">Initializing Live Map Engine...</p>
-            </div>
-        );
+    if (isLoading && !data) {
+        return <MapSkeleton />;
     }
-
-    // Filter only active "CLOCK_IN" to show on map 
-    // In a real scenario we would group by user and take latest status
-    const activeUsers = attendances.filter(a => a.type === 'CLOCK_IN');
-    const hasMapData = tasks.length > 0 || activeUsers.length > 0;
 
     return (
         <div className="w-full h-full min-h-[420px] relative rounded-3xl overflow-hidden border border-slate-200 shadow-sm z-10">
             <MapContainer
                 center={center}
-                zoom={13}
+                zoom={DEFAULT_ZOOM}
                 style={{ height: '100%', width: '100%', minHeight: 420 }}
-                scrollWheelZoom={true}
+                scrollWheelZoom
             >
                 <TileLayer
                     attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                     url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 />
 
-                {/* Draw Task Geofences */}
-                {tasks.map(task => {
-                    const isActive = new Date() >= new Date(task.startTime) && new Date() <= new Date(task.endTime);
-                    return (
+                {tasks.map((task) => (
+                    <Fragment key={task.id}>
                         <Circle
-                            key={task.id}
-                            center={[task.geofenceLat, task.geofenceLng]}
-                            radius={task.geofenceRadius}
+                            center={[task.lat, task.lng]}
+                            radius={task.radius}
                             pathOptions={{
-                                color: isActive ? '#10b981' : '#cbd5e1',
-                                fillColor: isActive ? '#10b981' : '#cbd5e1',
-                                fillOpacity: 0.2,
+                                color: '#2563eb',
+                                fillColor: '#3b82f6',
+                                fillOpacity: 0.18,
                                 weight: 2,
-                                dashArray: isActive ? undefined : '5, 5'
                             }}
                         >
-                            <Popup className="rounded-xl custom-popup">
-                                <div className="p-1">
-                                    <div className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">{task.template.replace('_', ' ')}</div>
-                                    <h3 className="text-lg font-bold text-slate-800 drop-shadow-sm">{task.title}</h3>
-                                    <p className="text-sm text-slate-600 font-medium">{task.zoneName}</p>
-
-                                    <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between">
-                                        <span className="text-xs font-bold font-mono bg-slate-100 text-slate-600 px-2 py-1 rounded-md">
-                                            Rad: {task.geofenceRadius}m
-                                        </span>
-                                        <span className={isActive ? "text-emerald-500 text-xs font-bold flex items-center" : "text-slate-400 text-xs font-bold"}>
-                                            {isActive ? <><span className="w-2 h-2 rounded-full bg-emerald-500 mr-1 animate-pulse"></span> ActiveNow</> : "Inactive"}
-                                        </span>
+                            <Popup className="rounded-xl">
+                                <div className="p-1 min-w-[180px]">
+                                    <div className="text-[10px] font-bold text-sky-600 uppercase tracking-wider mb-1">
+                                        Task geofence
                                     </div>
+                                    <h3 className="text-base font-bold text-slate-800">{task.title}</h3>
+                                    <p className="text-xs text-slate-500 mt-1 font-mono">Radius: {task.radius}m</p>
                                 </div>
                             </Popup>
                         </Circle>
-                    );
-                })}
+                        <Marker position={[task.lat, task.lng]} icon={taskMarkerIcon}>
+                            <Popup className="rounded-xl">
+                                <div className="p-1">
+                                    <div className="text-[10px] font-bold text-sky-600 uppercase tracking-wider mb-1">
+                                        Task center
+                                    </div>
+                                    <h3 className="text-base font-bold text-slate-800">{task.title}</h3>
+                                </div>
+                            </Popup>
+                        </Marker>
+                    </Fragment>
+                ))}
 
-                {/* Draw Active Users */}
-                {activeUsers.map(att => (
+                {volunteers.map((v) => (
                     <Marker
-                        key={att.id}
-                        position={[att.lat, att.lng]}
-                        icon={ActiveUserIcon}
+                        key={v.id}
+                        position={[v.lat, v.lng]}
+                        icon={v.status === 'ACTIVE' ? volunteerIconActive : volunteerIconIdle}
                     >
                         <Popup>
                             <div className="p-1">
-                                <div className="flex items-center space-x-2 mb-2">
-                                    <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center font-bold text-xs uppercase">
-                                        {(att.user?.firstName?.[0] || 'U')}{(att.user?.lastName?.[0] || 'N')}
-                                    </div>
-                                    <div>
-                                        <h4 className="font-bold text-slate-800 text-sm">{att.user?.firstName || 'Unknown'} {att.user?.lastName || 'User'}</h4>
-                                        <p className="text-xs text-slate-500 font-medium">{att.user?.role?.replace('_', ' ') || 'Unknown Role'}</p>
-                                    </div>
-                                </div>
-                                <div className="pt-2 border-t border-slate-100">
-                                    <p className="text-xs text-slate-600"><span className="font-bold">Task:</span> {att.task?.title || 'Unknown'}</p>
-                                    <p className="text-[10px] text-slate-400 mt-1">{new Date(att.timestamp).toLocaleTimeString()}</p>
-                                </div>
+                                <h4 className="font-bold text-slate-800 text-sm">{v.name}</h4>
+                                <p className="text-xs text-slate-500 mt-1">
+                                    {v.status === 'ACTIVE' ? (
+                                        <span className="text-emerald-600 font-semibold">Checked in</span>
+                                    ) : (
+                                        <span className="text-slate-500">Last known position</span>
+                                    )}
+                                </p>
                             </div>
                         </Popup>
                     </Marker>
                 ))}
-
             </MapContainer>
 
-            {/* Map UI Overlay */}
-            <div className="absolute top-4 left-4 z-[400] bg-white/90 backdrop-blur-md px-4 py-2 rounded-xl shadow-lg border border-white flex items-center space-x-3">
-                <div className="flex items-center">
-                    <span className="w-3 h-3 rounded-full bg-emerald-500 mr-2 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]"></span>
-                    <span className="text-xs font-bold text-slate-700 tracking-wide uppercase">Live Field Ops</span>
+            <div className="absolute top-4 left-4 z-[400] bg-white/95 backdrop-blur-md px-4 py-2 rounded-xl shadow-lg border border-slate-100 flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
+                    <span className="text-xs font-bold text-slate-700 uppercase tracking-wide">Live map</span>
                 </div>
-                <div className="h-4 w-px bg-slate-300"></div>
-                <div className="text-xs font-bold text-slate-500">
-                    {activeUsers.length} <span className="text-slate-400 font-medium">Volunteers</span>
-                </div>
-                <div className="text-xs font-bold text-slate-500">
-                    {tasks.length} <span className="text-slate-400 font-medium">Zones</span>
-                </div>
+                <div className="h-4 w-px bg-slate-200 hidden sm:block" />
+                <span className="text-xs font-bold text-slate-600">
+                    {volunteers.length}{' '}
+                    <span className="text-slate-400 font-medium">volunteers on map</span>
+                </span>
+                <span className="text-xs font-bold text-slate-600">
+                    {tasks.length} <span className="text-slate-400 font-medium">tasks</span>
+                </span>
+                {isFetching && (
+                    <span className="text-[10px] font-semibold text-sky-600 uppercase">Updating…</span>
+                )}
             </div>
 
-            {mapError && (
-                <div className="absolute bottom-4 left-4 z-[400] bg-amber-50 border border-amber-200 text-amber-700 text-xs font-semibold px-3 py-2 rounded-lg shadow-sm">
-                    {mapError}
+            <div className="absolute bottom-4 right-4 z-[400] bg-white/95 backdrop-blur-sm px-3 py-2 rounded-xl shadow-md border border-slate-100 text-xs font-semibold text-slate-600 space-y-1.5">
+                <div className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Legend</div>
+                <div>🟢 Volunteer (checked in)</div>
+                <div>⚪ Volunteer (last position)</div>
+                <div>🔵 Task center</div>
+                <div>Circle = geofence</div>
+            </div>
+
+            {dataUpdatedAt > 0 && (
+                <div className="absolute bottom-4 left-4 z-[400] text-[10px] font-medium text-slate-500 bg-white/80 px-2 py-1 rounded-lg border border-slate-100">
+                    Updated {new Date(dataUpdatedAt).toLocaleTimeString()}
                 </div>
             )}
 
-            {!mapError && !hasMapData && (
-                <div className="absolute bottom-4 right-4 z-[400] bg-slate-50 border border-slate-200 text-slate-600 text-xs font-semibold px-3 py-2 rounded-lg shadow-sm">
-                    No live geofence data yet. Create tasks and clock-ins to populate the map.
+            {isError && (
+                <div className="absolute top-16 left-4 right-4 sm:right-auto z-[400] max-w-md bg-amber-50 border border-amber-200 text-amber-900 text-xs font-semibold px-3 py-2 rounded-lg shadow-sm">
+                    Map data could not be loaded
+                    {error && error instanceof Error ? `: ${error.message}` : '.'} Retrying every 10s.
+                </div>
+            )}
+
+            {!isError && !hasPoints && (
+                <div className="absolute top-16 left-4 z-[400] bg-slate-50 border border-slate-200 text-slate-600 text-xs font-semibold px-3 py-2 rounded-lg shadow-sm max-w-xs">
+                    No active tasks or volunteer locations for your organization yet. Data refreshes every 10 seconds.
                 </div>
             )}
         </div>

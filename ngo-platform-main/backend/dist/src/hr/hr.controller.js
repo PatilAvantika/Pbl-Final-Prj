@@ -98,14 +98,20 @@ let HrController = class HrController {
     getMyLeaves(req) {
         return this.hrService.getMyLeaves(req.user.id);
     }
-    getAllLeaves(query) {
-        return this.hrService.getAllLeaves(query);
+    getAllLeaves(query, req) {
+        return this.hrService.getAllLeaves(query, {
+            organizationId: req.user?.organizationId ?? null,
+            role: req.user.role,
+        });
     }
     cancelLeave(leaveId, req) {
         return this.hrService.cancelLeave(leaveId, req.user.id);
     }
     async updateLeaveStatus(leaveId, data, req) {
-        const leave = await this.hrService.updateLeaveStatus(leaveId, data.status);
+        const leave = await this.hrService.updateLeaveStatus(leaveId, data.status, {
+            organizationId: req.user?.organizationId ?? null,
+            role: req.user.role,
+        });
         await this.auditService.log({
             actorId: req.user?.id,
             action: client_1.AuditAction.LEAVE_STATUS_UPDATED,
@@ -136,6 +142,7 @@ let HrController = class HrController {
 };
 exports.HrController = HrController;
 __decorate([
+    (0, roles_decorator_1.Roles)(client_2.Role.VOLUNTEER),
     (0, common_1.Post)('leaves'),
     __param(0, (0, common_1.Request)()),
     __param(1, (0, common_1.Body)()),
@@ -144,6 +151,7 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], HrController.prototype, "requestLeave", null);
 __decorate([
+    (0, roles_decorator_1.Roles)(client_2.Role.VOLUNTEER),
     (0, common_1.Get)('leaves/my-leaves'),
     __param(0, (0, common_1.Request)()),
     __metadata("design:type", Function),
@@ -151,14 +159,16 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], HrController.prototype, "getMyLeaves", null);
 __decorate([
-    (0, roles_decorator_1.Roles)(client_2.Role.SUPER_ADMIN, client_2.Role.HR_MANAGER, client_2.Role.NGO_ADMIN),
+    (0, roles_decorator_1.Roles)(client_2.Role.SUPER_ADMIN, client_2.Role.HR_MANAGER, client_2.Role.NGO_ADMIN, client_2.Role.FIELD_COORDINATOR, client_2.Role.FINANCE_MANAGER),
     (0, common_1.Get)('leaves/all'),
     __param(0, (0, common_2.Query)()),
+    __param(1, (0, common_1.Request)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [LeaveListQueryDto]),
+    __metadata("design:paramtypes", [LeaveListQueryDto, Object]),
     __metadata("design:returntype", void 0)
 ], HrController.prototype, "getAllLeaves", null);
 __decorate([
+    (0, roles_decorator_1.Roles)(client_2.Role.VOLUNTEER),
     (0, common_1.Delete)('leaves/:id'),
     (0, common_1.HttpCode)(common_1.HttpStatus.NO_CONTENT),
     __param(0, (0, common_1.Param)('id')),
@@ -168,7 +178,7 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], HrController.prototype, "cancelLeave", null);
 __decorate([
-    (0, roles_decorator_1.Roles)(client_2.Role.SUPER_ADMIN, client_2.Role.HR_MANAGER, client_2.Role.NGO_ADMIN),
+    (0, roles_decorator_1.Roles)(client_2.Role.SUPER_ADMIN, client_2.Role.HR_MANAGER, client_2.Role.NGO_ADMIN, client_2.Role.FIELD_COORDINATOR),
     (0, common_1.Put)('leaves/:id/status'),
     __param(0, (0, common_1.Param)('id')),
     __param(1, (0, common_1.Body)()),
@@ -178,6 +188,7 @@ __decorate([
     __metadata("design:returntype", Promise)
 ], HrController.prototype, "updateLeaveStatus", null);
 __decorate([
+    (0, roles_decorator_1.Roles)(client_2.Role.VOLUNTEER),
     (0, common_1.Get)('payslips/my-payslips'),
     __param(0, (0, common_1.Request)()),
     __metadata("design:type", Function),

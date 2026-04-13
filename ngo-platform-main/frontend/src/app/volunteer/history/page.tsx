@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import api from '../../../lib/axios';
-import { CheckCircle, XCircle, Clock, Loader2, CalendarDays } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import api from '../../../lib/api/client';
+import { getApiErrorMessage } from '@/lib/api-errors';
+import { CheckCircle, XCircle, Clock, Loader2, CalendarDays, AlertCircle } from 'lucide-react';
 
 type AttRow = {
     id: string;
@@ -43,13 +44,26 @@ function groupByDate(rows: AttRow[]): [string, AttRow[]][] {
 export default function AttendanceHistoryPage() {
     const [history, setHistory] = useState<AttRow[]>([]);
     const [loading, setLoading] = useState(true);
+    const [fetchError, setFetchError] = useState<string | null>(null);
+
+    const loadHistory = useCallback(async () => {
+        try {
+            setFetchError(null);
+            setLoading(true);
+            const res = await api.get('/attendance/my-history');
+            const rows = res.data;
+            setHistory(Array.isArray(rows) ? rows : []);
+        } catch (err: unknown) {
+            setFetchError(getApiErrorMessage(err, 'Could not load attendance history.'));
+            setHistory([]);
+        } finally {
+            setLoading(false);
+        }
+    }, []);
 
     useEffect(() => {
-        api.get('/attendance/my-history')
-            .then((res) => setHistory(res.data))
-            .catch(console.error)
-            .finally(() => setLoading(false));
-    }, []);
+        void loadHistory();
+    }, [loadHistory]);
 
     const groups = groupByDate(history);
 
@@ -68,6 +82,23 @@ export default function AttendanceHistoryPage() {
                     <div className="py-24 flex flex-col items-center justify-center text-slate-400">
                         <Loader2 className="w-8 h-8 animate-spin mb-3 text-emerald-500" />
                         <span className="text-[10px] font-bold uppercase tracking-widest">Loading…</span>
+                    </div>
+                ) : fetchError ? (
+                    <div className="bg-red-50 text-red-800 p-5 rounded-2xl border border-red-100">
+                        <div className="flex gap-3">
+                            <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                            <div>
+                                <p className="font-bold">Could not load history</p>
+                                <p className="mt-1 text-sm text-red-700">{fetchError}</p>
+                                <button
+                                    type="button"
+                                    onClick={() => void loadHistory()}
+                                    className="mt-4 text-sm font-bold text-red-900 underline"
+                                >
+                                    Retry
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 ) : history.length === 0 ? (
                     <div className="bg-white rounded-3xl p-12 text-center shadow-sm border border-slate-100">

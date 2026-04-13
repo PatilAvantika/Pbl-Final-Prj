@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import api from '../../../lib/axios';
+import api from '../../../lib/api/client';
+import { getApiErrorMessage } from '@/lib/api-errors';
 import { Camera, ClipboardList, Loader2, MapPin, CheckCircle, Clock, AlertCircle } from 'lucide-react';
 
 type ReportRow = {
@@ -33,13 +34,26 @@ const STATUS_ICON: Record<string, React.ReactNode> = {
 export default function MyReportsPage() {
     const [reports, setReports] = useState<ReportRow[]>([]);
     const [loading, setLoading] = useState(true);
+    const [fetchError, setFetchError] = useState<string | null>(null);
+
+    const load = useCallback(async () => {
+        try {
+            setFetchError(null);
+            setLoading(true);
+            const res = await api.get('/reports/my-reports');
+            const rows = res.data;
+            setReports(Array.isArray(rows) ? rows : []);
+        } catch (err: unknown) {
+            setFetchError(getApiErrorMessage(err, 'Could not load your reports.'));
+            setReports([]);
+        } finally {
+            setLoading(false);
+        }
+    }, []);
 
     useEffect(() => {
-        api.get('/reports/my-reports')
-            .then((res) => setReports(res.data))
-            .catch(console.error)
-            .finally(() => setLoading(false));
-    }, []);
+        void load();
+    }, [load]);
 
     const approved = reports.filter((r) => r.status === 'APPROVED').length;
     const pending = reports.filter((r) => r.status === 'SUBMITTED').length;
@@ -80,6 +94,18 @@ export default function MyReportsPage() {
                     <div className="py-24 flex flex-col items-center justify-center text-slate-400">
                         <Loader2 className="w-8 h-8 animate-spin mb-3 text-emerald-500" />
                         <span className="text-[10px] font-bold uppercase tracking-widest">Loading…</span>
+                    </div>
+                ) : fetchError ? (
+                    <div className="bg-red-50 text-red-800 rounded-2xl border border-red-100 p-5">
+                        <p className="font-bold">Could not load reports</p>
+                        <p className="mt-1 text-sm text-red-700">{fetchError}</p>
+                        <button
+                            type="button"
+                            onClick={() => void load()}
+                            className="mt-4 text-sm font-bold text-red-900 underline"
+                        >
+                            Retry
+                        </button>
                     </div>
                 ) : reports.length === 0 ? (
                     <div className="bg-white rounded-3xl p-12 text-center shadow-sm border border-slate-100">

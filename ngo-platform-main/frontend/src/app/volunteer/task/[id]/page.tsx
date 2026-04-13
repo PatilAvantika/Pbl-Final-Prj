@@ -3,7 +3,9 @@
 import { use, useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import api from '../../../../lib/axios';
+import api from '@/lib/api/client';
+import { getApiErrorMessage } from '@/lib/api-errors';
+import { buildAttendanceClockPayload } from '@/lib/clock-payload';
 import {
     ArrowLeft, MapPin, Navigation, Clock, Camera,
     Loader2, AlertCircle, CheckCircle, ExternalLink, Calendar,
@@ -82,9 +84,10 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
                 api.get('/attendance/my-history'),
             ]);
             setTask(taskRes.data);
-            setHistory(histRes.data);
-        } catch {
-            setErrorMsg('Could not load task. You may not be assigned to it.');
+            const rows = histRes.data;
+            setHistory(Array.isArray(rows) ? rows : []);
+        } catch (err: unknown) {
+            setErrorMsg(getApiErrorMessage(err, 'Could not load task. You may not be assigned to it.'));
         } finally {
             setLoading(false);
         }
@@ -112,19 +115,17 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
         navigator.geolocation.getCurrentPosition(
             async (position) => {
                 try {
-                    await api.post(kind === 'in' ? '/attendance/clock-in' : '/attendance/clock-out', {
-                        taskId: id,
-                        lat: position.coords.latitude,
-                        lng: position.coords.longitude,
-                        accuracyMeters: position.coords.accuracy,
-                        uniqueRequestId: `REQ_${uuidv4()}`,
-                        deviceId: getDeviceId(),
-                    });
+                    const payload = buildAttendanceClockPayload(
+                        id,
+                        position,
+                        getDeviceId(),
+                        `REQ_${uuidv4()}`,
+                    );
+                    await api.post(kind === 'in' ? '/attendance/clock-in' : '/attendance/clock-out', payload);
                     setSuccessMsg(kind === 'in' ? 'Clocked in — GPS verified.' : 'Clocked out — shift logged.');
                     await fetchData();
                 } catch (error: unknown) {
-                    const msg = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
-                    setErrorMsg(msg || `Failed to clock ${kind}.`);
+                    setErrorMsg(getApiErrorMessage(error, `Failed to clock ${kind}.`));
                 } finally {
                     setClocking(null);
                 }

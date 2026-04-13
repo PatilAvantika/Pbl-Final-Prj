@@ -10,17 +10,20 @@ exports.TasksModule = void 0;
 const common_1 = require("@nestjs/common");
 const tasks_service_1 = require("./tasks.service");
 const tasks_controller_1 = require("./tasks.controller");
+const admin_tasks_controller_1 = require("../admin/admin-tasks.controller");
+const admin_tasks_service_1 = require("../admin/admin-tasks.service");
 const prisma_module_1 = require("../prisma/prisma.module");
 const audit_module_1 = require("../audit/audit.module");
+const field_ops_module_1 = require("../field-ops/field-ops.module");
 let TasksModule = class TasksModule {
 };
 exports.TasksModule = TasksModule;
 exports.TasksModule = TasksModule = __decorate([
     (0, common_1.Module)({
-        imports: [prisma_module_1.PrismaModule, audit_module_1.AuditModule],
-        controllers: [tasks_controller_1.TasksController],
-        providers: [tasks_service_1.TasksService],
-        exports: [tasks_service_1.TasksService]
+        imports: [prisma_module_1.PrismaModule, audit_module_1.AuditModule, field_ops_module_1.FieldOpsModule],
+        controllers: [tasks_controller_1.TasksController, admin_tasks_controller_1.AdminTasksController],
+        providers: [tasks_service_1.TasksService, admin_tasks_service_1.AdminTasksService],
+        exports: [tasks_service_1.TasksService],
     })
 ], TasksModule);
 //# sourceMappingURL=tasks.module.js.map

@@ -18,39 +18,42 @@ const throttler_1 = require("@nestjs/throttler");
 const auth_service_1 = require("./auth.service");
 const passport_1 = require("@nestjs/passport");
 const auth_dto_1 = require("./dto/auth.dto");
-const auth_constants_1 = require("./auth.constants");
+const cookie_util_1 = require("./cookie.util");
+const auth_dto_2 = require("./dto/auth.dto");
 let AuthController = class AuthController {
     authService;
     constructor(authService) {
         this.authService = authService;
     }
-    setAuthCookie(res, token) {
-        const maxAgeMs = (0, auth_constants_1.getJwtExpiresSec)() * 1000;
-        res.cookie('token', token, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-            maxAge: maxAgeMs,
-            path: '/',
-        });
-    }
     async login(body, res) {
         const user = await this.authService.validateUser(body.email, body.password);
-        const result = await this.authService.login(user);
-        this.setAuthCookie(res, result.access_token);
-        return result;
+        const session = await this.authService.issueSession(user);
+        (0, cookie_util_1.setAccessTokenCookie)(res, session.accessToken);
+        (0, cookie_util_1.setRefreshTokenCookie)(res, session.refreshTokenRaw, session.refreshTtlSec);
+        return { user: session.user };
+    }
+    async refresh(req, res) {
+        const raw = req.cookies?.[cookie_util_1.REFRESH_TOKEN_COOKIE];
+        if (!raw || typeof raw !== 'string') {
+            throw new common_1.UnauthorizedException('Missing refresh session');
+        }
+        const session = await this.authService.rotateRefreshSession(raw);
+        (0, cookie_util_1.setAccessTokenCookie)(res, session.accessToken);
+        (0, cookie_util_1.setRefreshTokenCookie)(res, session.refreshTokenRaw, session.refreshTtlSec);
+        return { success: true };
     }
     async register(body, res) {
-        const result = await this.authService.registerUser(body);
-        this.setAuthCookie(res, result.access_token);
-        return result;
+        const session = await this.authService.registerUser(body);
+        (0, cookie_util_1.setAccessTokenCookie)(res, session.accessToken);
+        (0, cookie_util_1.setRefreshTokenCookie)(res, session.refreshTokenRaw, session.refreshTtlSec);
+        return { user: session.user };
     }
     getMe(req) {
         return this.authService.getMe(req.user.id);
     }
     async logout(req, res) {
         await this.authService.invalidateAuthTokens(req.user.id);
-        res.clearCookie('token', { path: '/' });
+        (0, cookie_util_1.clearAuthCookies)(res);
         return { success: true };
     }
 };
@@ -62,9 +65,19 @@ __decorate([
     __param(0, (0, common_1.Body)()),
     __param(1, (0, common_1.Res)({ passthrough: true })),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [auth_dto_1.LoginDto, Object]),
+    __metadata("design:paramtypes", [auth_dto_2.LoginDto, Object]),
     __metadata("design:returntype", Promise)
 ], AuthController.prototype, "login", null);
+__decorate([
+    (0, common_1.UseGuards)(throttler_1.ThrottlerGuard),
+    (0, throttler_1.Throttle)({ default: { limit: 20, ttl: 60_000 } }),
+    (0, common_1.Post)('refresh'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Res)({ passthrough: true })),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
+], AuthController.prototype, "refresh", null);
 __decorate([
     (0, common_1.UseGuards)(throttler_1.ThrottlerGuard),
     (0, throttler_1.Throttle)({ default: { limit: 5, ttl: 60_000 } }),

@@ -1,4 +1,4 @@
-import { Role } from '../context/AuthContext';
+import type { Role } from '../types/role';
 
 export const PermissionMatrix = {
     manageUsers: ['SUPER_ADMIN', 'NGO_ADMIN', 'HR_MANAGER'],

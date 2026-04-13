@@ -1,8 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import api from '../../../lib/axios';
-import { Clock, CheckCircle, XCircle, Loader2, CalendarDays, TrendingUp, ChevronLeft, ChevronRight } from 'lucide-react';
+import api from '../../../lib/api/client';
+import { getApiErrorMessage } from '@/lib/api-errors';
+import { Clock, CheckCircle, XCircle, Loader2, CalendarDays, TrendingUp, ChevronLeft, ChevronRight, AlertCircle } from 'lucide-react';
 
 type AttendanceRow = {
     id: string;
@@ -99,6 +100,7 @@ function shiftDuration(history: AttendanceRow[], row: AttendanceRow): string | n
 export default function AttendancePage() {
     const [history, setHistory] = useState<AttendanceRow[]>([]);
     const [loading, setLoading] = useState(true);
+    const [fetchError, setFetchError] = useState<string | null>(null);
 
     const now = new Date();
     const [viewYear, setViewYear] = useState(now.getFullYear());
@@ -106,11 +108,14 @@ export default function AttendancePage() {
 
     const fetchHistory = useCallback(async () => {
         try {
+            setFetchError(null);
             setLoading(true);
             const res = await api.get('/attendance/my-history');
-            setHistory(res.data);
-        } catch (err) {
-            console.error(err);
+            const rows = res.data;
+            setHistory(Array.isArray(rows) ? rows : []);
+        } catch (err: unknown) {
+            setFetchError(getApiErrorMessage(err, 'Could not load attendance.'));
+            setHistory([]);
         } finally {
             setLoading(false);
         }
@@ -168,6 +173,23 @@ export default function AttendancePage() {
                     <div className="py-24 flex flex-col items-center text-slate-400">
                         <Loader2 className="w-8 h-8 animate-spin mb-3 text-emerald-500" />
                         <span className="text-[10px] font-bold uppercase tracking-widest">Loading…</span>
+                    </div>
+                ) : fetchError ? (
+                    <div className="bg-red-50 text-red-800 p-5 rounded-2xl border border-red-100">
+                        <div className="flex gap-3">
+                            <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                            <div>
+                                <p className="font-bold">Could not load attendance</p>
+                                <p className="mt-1 text-sm text-red-700">{fetchError}</p>
+                                <button
+                                    type="button"
+                                    onClick={() => void fetchHistory()}
+                                    className="mt-4 text-sm font-bold text-red-900 underline"
+                                >
+                                    Retry
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 ) : (
                     <>

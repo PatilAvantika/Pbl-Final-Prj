@@ -8,6 +8,7 @@ import {
   UserCog,
   UserCheck,
   Briefcase,
+  HeartHandshake,
   ArrowRight,
   Mail,
   Phone,
@@ -104,12 +105,18 @@ export default function Home() {
                 Continue with the right portal and enter your dashboard experience.
               </p>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-5">
               <PortalCard
                 href="/login?role=admin"
                 title="Admin Login"
                 description="Super admin, NGO admin, and coordinator access."
                 icon={<UserCog className="w-7 h-7 text-sky-600" />}
+              />
+              <PortalCard
+                href="/login?role=team-leader"
+                title="Team Leader Login"
+                description="Manage your field team, tasks, and attendance."
+                icon={<Users className="w-7 h-7 text-teal-600" />}
               />
               <PortalCard
                 href="/login?role=volunteer"
@@ -120,8 +127,14 @@ export default function Home() {
               <PortalCard
                 href="/login?role=staff"
                 title="Staff Login"
-                description="Operations and internal staff dashboard access."
+                description="Limited staff workspace (separate from full admin)."
                 icon={<Briefcase className="w-7 h-7 text-indigo-600" />}
+              />
+              <PortalCard
+                href="/login?role=donor"
+                title="Donor Portal"
+                description="Track impact, verified reports, and funded campaigns."
+                icon={<HeartHandshake className="w-7 h-7 text-amber-600" />}
               />
             </div>
           </div>

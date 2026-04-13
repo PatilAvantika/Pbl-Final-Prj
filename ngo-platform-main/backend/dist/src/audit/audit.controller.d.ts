@@ -21,12 +21,12 @@ export declare class AuditController {
         } | null;
     } & {
         id: string;
+        createdAt: Date;
         actorId: string | null;
         action: import("@prisma/client").$Enums.AuditAction;
         entityType: string;
         entityId: string;
         metadata: import("@prisma/client/runtime/client").JsonValue | null;
-        createdAt: Date;
     })[]>;
     exportCsv(query: AuditQueryDto, res: Response): Promise<void>;
 }

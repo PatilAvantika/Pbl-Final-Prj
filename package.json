@@ -1,0 +1,11 @@
+{
+  "name": "ngo-platform",
+  "private": true,
+  "description": "Monorepo root. Prisma schema is in ngo-platform-main/backend — run migrations via scripts below, not bare npx prisma from this folder.",
+  "scripts": {
+    "prisma:migrate": "npm run db:deploy --prefix ngo-platform-main/backend",
+    "prisma:generate": "npm exec --prefix ngo-platform-main/backend -- prisma generate",
+    "backend:dev": "npm run start:dev --prefix ngo-platform-main/backend",
+    "frontend:dev": "npm run dev --prefix ngo-platform-main/frontend"
+  }
+}

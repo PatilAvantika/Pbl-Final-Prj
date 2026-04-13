@@ -1,11 +1,12 @@
 'use client';
 
 import { useState } from 'react';
-import api from '../../../lib/axios';
-import { Plus, Search, MapPin, Calendar, Users, Target, ArrowRight, Pencil, Power } from 'lucide-react';
+import api from '../../../lib/api/client';
+import { Plus, Search, MapPin, Calendar, Users, ArrowRight, Pencil, Power } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../../context/AuthContext';
 import { hasPermission } from '../../../lib/permissions';
+import { CreateTaskModal } from '@/components/admin/CreateTaskModal';
 
 export default function TasksAdminPage() {
     const queryClient = useQueryClient();
@@ -21,11 +22,6 @@ export default function TasksAdminPage() {
     const [availableUsers, setAvailableUsers] = useState<any[]>([]);
     const [selectedAssignUserIds, setSelectedAssignUserIds] = useState<string[]>([]);
     const [selectedRemoveUserIds, setSelectedRemoveUserIds] = useState<string[]>([]);
-    const [formData, setFormData] = useState({
-        title: '', template: 'WASTE_COLLECTION', zoneName: '',
-        geofenceLat: '', geofenceLng: '', geofenceRadius: 100,
-        startTime: '', endTime: ''
-    });
     const [editFormData, setEditFormData] = useState({
         id: '',
         title: '', template: 'WASTE_COLLECTION', zoneName: '',
@@ -44,15 +40,6 @@ export default function TasksAdminPage() {
         },
     });
 
-    const createTaskMutation = useMutation({
-        mutationFn: async (payload: any) => api.post('/tasks', payload),
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['admin-tasks'] });
-            setShowModal(false);
-            setFormData({ title: '', template: 'WASTE_COLLECTION', zoneName: '', geofenceLat: '', geofenceLng: '', geofenceRadius: 100, startTime: '', endTime: '' });
-        },
-    });
-
     const updateTaskMutation = useMutation({
         mutationFn: async ({ id, payload }: { id: string; payload: any }) => api.put(`/tasks/${id}`, payload),
         onSuccess: () => {
@@ -60,20 +47,6 @@ export default function TasksAdminPage() {
             setShowEditModal(false);
         },
     });
-
-    const handleCreate = async (e: React.FormEvent) => {
-        e.preventDefault();
-        try {
-            await createTaskMutation.mutateAsync({
-                ...formData,
-                geofenceLat: parseFloat(formData.geofenceLat),
-                geofenceLng: parseFloat(formData.geofenceLng),
-                geofenceRadius: parseFloat(formData.geofenceRadius as any)
-            });
-        } catch (error) {
-            alert("Failed to create task");
-        }
-    };
 
     const openEditModal = (task: any) => {
         setEditFormData({
@@ -283,71 +256,8 @@ export default function TasksAdminPage() {
                 </div>
             )}
 
-            {/* Basic Create Task Modal */}
             {showModal && canEditTasks && (
-                <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
-                    <div className="bg-white rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-                        <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50">
-                            <h2 className="text-xl font-extrabold text-slate-800 tracking-tight flex items-center">
-                                <Target className="w-5 h-5 mr-2 text-emerald-500" /> Initialize Ops Zone
-                            </h2>
-                            <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-slate-600 font-bold p-2 text-xl leading-none">&times;</button>
-                        </div>
-                        <form onSubmit={handleCreate} className="p-6 space-y-4">
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-1 col-span-2 md:col-span-1">
-                                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">Task Title</label>
-                                    <input required type="text" value={formData.title} onChange={e => setFormData({ ...formData, title: e.target.value })} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-700 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 text-sm font-medium" />
-                                </div>
-                                <div className="space-y-1 col-span-2 md:col-span-1">
-                                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">Template</label>
-                                    <select value={formData.template} onChange={e => setFormData({ ...formData, template: e.target.value })} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-700 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 text-sm font-medium cursor-pointer">
-                                        <option value="WASTE_COLLECTION">Waste Collection</option>
-                                        <option value="PLANTATION">Plantation Drive</option>
-                                        <option value="AWARENESS">Awareness Campaign</option>
-                                        <option value="SURVEY">Field Survey</option>
-                                    </select>
-                                </div>
-                            </div>
-
-                            <div className="space-y-1">
-                                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">Location / Zone Name</label>
-                                <input required type="text" value={formData.zoneName} onChange={e => setFormData({ ...formData, zoneName: e.target.value })} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-700 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 text-sm font-medium" />
-                            </div>
-
-                            <div className="grid grid-cols-3 gap-4 p-4 bg-sky-50/50 rounded-2xl border border-sky-100">
-                                <div className="space-y-1">
-                                    <label className="text-xs font-bold text-sky-700 uppercase tracking-wider pl-1">Geofence Lat</label>
-                                    <input required type="number" step="any" value={formData.geofenceLat} onChange={e => setFormData({ ...formData, geofenceLat: e.target.value })} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-slate-700 focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 text-sm font-medium" />
-                                </div>
-                                <div className="space-y-1">
-                                    <label className="text-xs font-bold text-sky-700 uppercase tracking-wider pl-1">Geofence Lng</label>
-                                    <input required type="number" step="any" value={formData.geofenceLng} onChange={e => setFormData({ ...formData, geofenceLng: e.target.value })} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-slate-700 focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 text-sm font-medium" />
-                                </div>
-                                <div className="space-y-1">
-                                    <label className="text-xs font-bold text-sky-700 uppercase tracking-wider pl-1">Radius (meters)</label>
-                                    <input required type="number" min="10" value={formData.geofenceRadius} onChange={e => setFormData({ ...formData, geofenceRadius: parseInt(e.target.value) })} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-slate-700 focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 text-sm font-medium" />
-                                </div>
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-1">
-                                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">Start Time</label>
-                                    <input required type="datetime-local" value={formData.startTime} onChange={e => setFormData({ ...formData, startTime: e.target.value })} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-700 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 text-sm font-medium" />
-                                </div>
-                                <div className="space-y-1">
-                                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">End Time</label>
-                                    <input required type="datetime-local" value={formData.endTime} onChange={e => setFormData({ ...formData, endTime: e.target.value })} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-700 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 text-sm font-medium" />
-                                </div>
-                            </div>
-
-                            <div className="pt-4 flex justify-end space-x-3">
-                                <button type="button" onClick={() => setShowModal(false)} className="px-5 py-2.5 rounded-xl font-bold text-slate-600 hover:bg-slate-100 transition-colors">Cancel</button>
-                                <button type="submit" className="px-5 py-2.5 rounded-xl font-bold text-white bg-slate-800 hover:bg-slate-900 transition-all shadow-lg hover:-translate-y-0.5">Deploy Task</button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
+                <CreateTaskModal open={showModal} onClose={() => setShowModal(false)} />
             )}
 
             {showEditModal && canEditTasks && (

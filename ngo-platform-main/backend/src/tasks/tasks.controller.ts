@@ -1,145 +1,30 @@
-import { Controller, Get, Post, Body, Param, Delete, Put, UseGuards, Request, Query } from '@nestjs/common';
+import {
+    Controller,
+    ForbiddenException,
+    Get,
+    Post,
+    Body,
+    Param,
+    Delete,
+    Put,
+    Patch,
+    UseGuards,
+    Request,
+    Query,
+} from '@nestjs/common';
 import { TasksService } from './tasks.service';
-import { AuditAction, Prisma, TaskTemplate, Role } from '@prisma/client';
+import { AuditAction, Prisma, Role } from '@prisma/client';
 import { AuthGuard } from '@nestjs/passport';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
-import { Type } from 'class-transformer';
-import {
-    IsBoolean,
-    IsBooleanString,
-    IsDate,
-    IsEnum,
-    IsNotEmpty,
-    IsNumber,
-    IsOptional,
-    IsPositive,
-    IsString,
-    IsUUID,
-    Max,
-    Min,
-} from 'class-validator';
-import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { AuditService } from '../audit/audit.service';
+import { AssignStrategyDto, PatchTaskDto } from './dto/patch-task.dto';
+import { AssignUserDto, CreateTaskDto, TasksQueryDto, UpdateTaskDto } from './dto/task-mutations.dto';
 
-export class CreateTaskDto {
-    @IsString()
-    @IsNotEmpty()
-    title: string;
-
-    @IsOptional()
-    @IsString()
-    description?: string;
-
-    @IsEnum(TaskTemplate)
-    template: TaskTemplate;
-
-    @IsString()
-    @IsNotEmpty()
-    zoneName: string;
-
-    @Type(() => Number)
-    @IsNumber()
-    @Min(-90)
-    @Max(90)
-    geofenceLat: number;
-
-    @Type(() => Number)
-    @IsNumber()
-    @Min(-180)
-    @Max(180)
-    geofenceLng: number;
-
-    @Type(() => Number)
-    @IsNumber()
-    @IsPositive()
-    geofenceRadius: number;
-
-    @Type(() => Date)
-    @IsDate()
-    startTime: string | Date;
-
-    @Type(() => Date)
-    @IsDate()
-    endTime: string | Date;
-
-    @IsOptional()
-    @IsBoolean()
-    isActive?: boolean;
-}
-
-/** Partial update: all fields optional; same rules as CreateTaskDto when present. */
-export class UpdateTaskDto {
-    @IsOptional()
-    @IsString()
-    @IsNotEmpty()
-    title?: string;
-
-    @IsOptional()
-    @IsString()
-    description?: string;
-
-    @IsOptional()
-    @IsEnum(TaskTemplate)
-    template?: TaskTemplate;
-
-    @IsOptional()
-    @IsString()
-    @IsNotEmpty()
-    zoneName?: string;
-
-    @IsOptional()
-    @Type(() => Number)
-    @IsNumber()
-    @Min(-90)
-    @Max(90)
-    geofenceLat?: number;
-
-    @IsOptional()
-    @Type(() => Number)
-    @IsNumber()
-    @Min(-180)
-    @Max(180)
-    geofenceLng?: number;
-
-    @IsOptional()
-    @Type(() => Number)
-    @IsNumber()
-    @IsPositive()
-    geofenceRadius?: number;
-
-    @IsOptional()
-    @Type(() => Date)
-    @IsDate()
-    startTime?: string | Date;
-
-    @IsOptional()
-    @Type(() => Date)
-    @IsDate()
-    endTime?: string | Date;
-
-    @IsOptional()
-    @IsBoolean()
-    isActive?: boolean;
-}
-
-export class AssignUserDto {
-    @IsUUID('4')
-    userId: string;
-}
-
-export class TasksQueryDto extends PaginationQueryDto {
-    @IsOptional()
-    @IsString()
-    search?: string;
-
-    @IsOptional()
-    @IsEnum(TaskTemplate)
-    template?: TaskTemplate;
-
-    @IsOptional()
-    @IsBooleanString()
-    isActive?: string;
+function requireOrganizationId(req: { user?: { organizationId?: string } }): string {
+    const id = req.user?.organizationId;
+    if (!id) throw new ForbiddenException('User is not associated with an organization');
+    return id;
 }
 
 @UseGuards(AuthGuard('jwt'), RolesGuard)
@@ -148,16 +33,24 @@ export class TasksController {
     constructor(
         private readonly tasksService: TasksService,
         private readonly auditService: AuditService,
-    ) { }
+    ) {}
 
-    @Roles(Role.SUPER_ADMIN, Role.NGO_ADMIN, Role.FIELD_COORDINATOR)
+    @Roles(Role.SUPER_ADMIN, Role.NGO_ADMIN, Role.FIELD_COORDINATOR, Role.TEAM_LEADER)
     @Post()
     async create(@Body() data: CreateTaskDto, @Request() req: any) {
+        const organizationId = requireOrganizationId(req);
+        const { priority, maxVolunteers, ...rest } = data;
         const parsedData: Prisma.TaskCreateInput = {
-            ...data,
+            ...rest,
             startTime: new Date(data.startTime),
-            endTime: new Date(data.endTime)
+            endTime: new Date(data.endTime),
+            priority: priority ?? 'MEDIUM',
+            maxVolunteers: maxVolunteers ?? undefined,
+            organization: { connect: { id: organizationId } },
         };
+        if (req.user?.role === Role.TEAM_LEADER && req.user?.id) {
+            parsedData.teamLeader = { connect: { id: req.user.id } };
+        }
         const task = await this.tasksService.create(parsedData);
         await this.auditService.log({
             actorId: req.user?.id,
@@ -170,31 +63,54 @@ export class TasksController {
     }
 
     @Get()
-    @Roles(Role.SUPER_ADMIN, Role.NGO_ADMIN, Role.FIELD_COORDINATOR, Role.HR_MANAGER, Role.FINANCE_MANAGER)
-    findAll(@Query() query: TasksQueryDto) {
+    @Roles(
+        Role.SUPER_ADMIN,
+        Role.NGO_ADMIN,
+        Role.FIELD_COORDINATOR,
+        Role.HR_MANAGER,
+        Role.FINANCE_MANAGER,
+        Role.TEAM_LEADER,
+    )
+    findAll(@Query() query: TasksQueryDto, @Request() req: any) {
+        const organizationId = requireOrganizationId(req);
         return this.tasksService.findAll({
             page: query.page,
             limit: query.limit,
             search: query.search,
             template: query.template,
             isActive: query.isActive !== undefined ? query.isActive === 'true' : undefined,
+            organizationId,
         });
     }
 
     @Get('my-tasks')
     findMyTasks(@Request() req: any) {
-        return this.tasksService.findAssignedToUser(req.user.id);
+        const organizationId = requireOrganizationId(req);
+        return this.tasksService.findAssignedToUser(req.user.id, organizationId);
+    }
+
+    @Roles(Role.TEAM_LEADER)
+    @Get('team-leader')
+    findTeamLeaderTasks(@Request() req: any) {
+        const organizationId = requireOrganizationId(req);
+        return this.tasksService.findTasksForTeamLeader(req.user.id, organizationId);
     }
 
     @Get(':id')
     findOne(@Param('id') id: string, @Request() req: any) {
-        return this.tasksService.findOneForRequester(id, req.user.id, req.user.role);
+        const organizationId = requireOrganizationId(req);
+        return this.tasksService.findOneForRequester(id, req.user.id, req.user.role, organizationId);
     }
 
-    @Roles(Role.SUPER_ADMIN, Role.NGO_ADMIN, Role.FIELD_COORDINATOR)
+    @Roles(Role.SUPER_ADMIN, Role.NGO_ADMIN, Role.FIELD_COORDINATOR, Role.TEAM_LEADER)
     @Put(':id')
     async update(@Param('id') id: string, @Body() updateTaskDto: UpdateTaskDto, @Request() req: any) {
-        const task = await this.tasksService.update(id, updateTaskDto as unknown as Prisma.TaskUpdateInput);
+        const organizationId = requireOrganizationId(req);
+        const task = await this.tasksService.update(
+            id,
+            organizationId,
+            updateTaskDto as unknown as Prisma.TaskUpdateInput,
+        );
         await this.auditService.log({
             actorId: req.user?.id,
             action: AuditAction.TASK_UPDATED,
@@ -205,10 +121,44 @@ export class TasksController {
         return task;
     }
 
-    @Roles(Role.SUPER_ADMIN, Role.NGO_ADMIN, Role.FIELD_COORDINATOR)
+    /** Team-leader / field-ops partial update (lifecycle, assigneeIds, task fields). */
+    @Roles(Role.SUPER_ADMIN, Role.NGO_ADMIN, Role.FIELD_COORDINATOR, Role.TEAM_LEADER)
+    @Patch(':id')
+    async patch(@Param('id') id: string, @Body() dto: PatchTaskDto, @Request() req: any) {
+        const organizationId = requireOrganizationId(req);
+        return this.tasksService.patchTeamLeader(
+            id,
+            organizationId,
+            req.user.id,
+            req.user.role,
+            dto,
+        );
+    }
+
+    /** Explicit assignment strategy (legacy Express parity). */
+    @Roles(Role.SUPER_ADMIN, Role.NGO_ADMIN, Role.FIELD_COORDINATOR, Role.TEAM_LEADER)
+    @Post(':id/assign-strategy')
+    async assignStrategy(
+        @Param('id') taskId: string,
+        @Body() body: AssignStrategyDto,
+        @Request() req: any,
+    ) {
+        const organizationId = requireOrganizationId(req);
+        return this.tasksService.assignWithStrategy(
+            taskId,
+            organizationId,
+            req.user.id,
+            req.user.role,
+            body.mode,
+            body.userIds,
+        );
+    }
+
+    @Roles(Role.SUPER_ADMIN, Role.NGO_ADMIN, Role.FIELD_COORDINATOR, Role.TEAM_LEADER)
     @Delete(':id')
     async remove(@Param('id') id: string, @Request() req: any) {
-        const task = await this.tasksService.remove(id);
+        const organizationId = requireOrganizationId(req);
+        const task = await this.tasksService.remove(id, organizationId);
         await this.auditService.log({
             actorId: req.user?.id,
             action: AuditAction.TASK_DELETED,
@@ -219,11 +169,14 @@ export class TasksController {
         return task;
     }
 
-    // --- Assignments ---
-    @Roles(Role.SUPER_ADMIN, Role.NGO_ADMIN, Role.FIELD_COORDINATOR)
+    @Roles(Role.SUPER_ADMIN, Role.NGO_ADMIN, Role.FIELD_COORDINATOR, Role.TEAM_LEADER)
     @Post(':id/assign')
     async assignUser(@Param('id') taskId: string, @Body() data: AssignUserDto, @Request() req: any) {
-        const assignment = await this.tasksService.assignUserToTask(taskId, data.userId);
+        const organizationId = requireOrganizationId(req);
+        const assignment = await this.tasksService.assignUserToTask(taskId, data.userId, organizationId, {
+            id: req.user.id,
+            role: req.user.role,
+        });
         await this.auditService.log({
             actorId: req.user?.id,
             action: AuditAction.TASK_ASSIGNED,
@@ -234,10 +187,14 @@ export class TasksController {
         return assignment;
     }
 
-    @Roles(Role.SUPER_ADMIN, Role.NGO_ADMIN, Role.FIELD_COORDINATOR)
+    @Roles(Role.SUPER_ADMIN, Role.NGO_ADMIN, Role.FIELD_COORDINATOR, Role.TEAM_LEADER)
     @Delete(':id/assign/:userId')
     async removeUser(@Param('id') taskId: string, @Param('userId') userId: string, @Request() req: any) {
-        await this.tasksService.removeUserFromTask(taskId, userId);
+        const organizationId = requireOrganizationId(req);
+        await this.tasksService.removeUserFromTask(taskId, userId, organizationId, {
+            id: req.user.id,
+            role: req.user.role,
+        });
         await this.auditService.log({
             actorId: req.user?.id,
             action: AuditAction.TASK_UNASSIGNED,

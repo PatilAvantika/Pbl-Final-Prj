@@ -2,14 +2,23 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import api from '../../../lib/axios';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import api from '../../../lib/api/client';
 import { useAuth } from '../../../context/AuthContext';
+import { getApiErrorMessage } from '@/lib/api-errors';
+import { buildAttendanceClockPayload } from '@/lib/clock-payload';
+import { useDashboardStats, volunteerDashboardQueryKey } from '@/features/volunteer/hooks/useDashboardStats';
+import { useActiveTasks, volunteerActiveTasksQueryKey } from '@/features/volunteer/hooks/useActiveTasks';
+import { useAttendanceSummary, attendanceSummaryQueryKey } from '@/features/volunteer/hooks/useAttendanceSummary';
+import { useReportSummary } from '@/features/volunteer/hooks/useReportSummary';
+import { VolunteerDeploymentCard } from '@/features/volunteer/components/VolunteerDeploymentCard';
 import {
     MapPin, CheckCircle, Loader2, AlertCircle,
-    Camera, ClipboardList, Clock, CalendarDays,
+    ClipboardList, Clock, CalendarDays,
     ChevronRight, Zap, Target, ArrowRight,
 } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
+import { toast } from 'sonner';
 
 type AttendanceRow = {
     id: string;
@@ -27,114 +36,136 @@ type ReportRow = {
     task?: { title?: string; zoneName?: string };
 };
 
-type Task = {
-    id: string;
-    title: string;
-    zoneName: string;
-    template: string;
-    startTime: string;
-    endTime?: string;
-    geofenceRadius: number;
-    geofenceLat: number;
-    geofenceLng: number;
-    status?: string;
-    priority?: string;
-};
+const attendanceHistoryKey = ['volunteer', 'my-attendance-history'] as const;
+const myReportsKey = ['volunteer', 'my-reports'] as const;
 
-function computeStats(history: AttendanceRow[], tasks: Task[], reports: ReportRow[]) {
-    const now = new Date();
-
-    const thisMonthHistory = history.filter((h) => {
-        const d = new Date(h.timestamp);
-        return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
-    });
-
-    const clockIns = thisMonthHistory.filter((h) => h.type === 'CLOCK_IN');
-    const clockOuts = thisMonthHistory.filter((h) => h.type === 'CLOCK_OUT');
-
-    let totalMs = 0;
-    clockOuts.forEach((out) => {
-        const outTime = new Date(out.timestamp);
-        const matchIn = clockIns.find(
-            (ci) => ci.taskId === out.taskId && new Date(ci.timestamp).toDateString() === outTime.toDateString(),
-        );
-        if (matchIn) totalMs += outTime.getTime() - new Date(matchIn.timestamp).getTime();
-    });
-
-    const totalHours = Math.floor(totalMs / 3600000);
-    const attendedDays = new Set(clockIns.map((h) => new Date(h.timestamp).toDateString())).size;
-    const completedTasks = tasks.filter((t) => t.status === 'COMPLETED').length;
-
-    const allDates = new Set(
-        history.filter((h) => h.type === 'CLOCK_IN').map((h) => new Date(h.timestamp).toDateString()),
-    );
-    let streak = 0;
-    for (let i = 0; i <= 60; i++) {
-        const d = new Date(now);
-        d.setDate(now.getDate() - i);
-        if (allDates.has(d.toDateString())) {
-            streak++;
-        } else if (i === 0) {
-            continue;
-        } else {
-            break;
-        }
-    }
-
-    return { totalHours, attendedDays, completedTasks, streak, reportsCount: reports.length };
-}
-
+/** Latest attendance event today for this task (by timestamp). */
 function lastTodayAttendanceForTask(history: AttendanceRow[], taskId: string): 'CLOCK_IN' | 'CLOCK_OUT' | null {
     const start = new Date();
     start.setHours(0, 0, 0, 0);
     const end = new Date();
     end.setHours(23, 59, 59, 999);
+    let last: AttendanceRow | null = null;
+    let lastMs = 0;
     for (const h of history) {
         if (h.taskId !== taskId) continue;
         const t = new Date(h.timestamp);
-        if (t >= start && t <= end) return h.type as 'CLOCK_IN' | 'CLOCK_OUT';
+        const ms = t.getTime();
+        if (ms < start.getTime() || ms > end.getTime()) continue;
+        if (!last || ms > lastMs) {
+            last = h;
+            lastMs = ms;
+        }
     }
-    return null;
+    return last ? (last.type as 'CLOCK_IN' | 'CLOCK_OUT') : null;
 }
 
-const PRIORITY_DOT: Record<string, string> = {
-    HIGH: 'bg-red-500',
-    MEDIUM: 'bg-amber-400',
-    LOW: 'bg-emerald-500',
-};
+function formatLastCheckInTime(iso: string | null): string {
+    if (!iso) return '—';
+    try {
+        return new Date(iso).toLocaleTimeString(undefined, {
+            hour: 'numeric',
+            minute: '2-digit',
+        });
+    } catch {
+        return '—';
+    }
+}
+
+function QuickAccessSummarySkeleton() {
+    return (
+        <div
+            className="flex flex-col gap-2 p-4 rounded-2xl bg-white border border-slate-100 shadow-sm animate-pulse"
+            aria-busy="true"
+        >
+            <div className="flex items-start gap-3">
+                <div className="w-9 h-9 rounded-xl bg-slate-200 shrink-0" />
+                <div className="flex-1 min-w-0 space-y-2 pt-0.5">
+                    <div className="h-3.5 w-28 rounded bg-slate-200" />
+                    <div className="h-2.5 w-full rounded bg-slate-100" />
+                    <div className="h-2.5 w-20 rounded bg-slate-100" />
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function DeploymentsSkeleton() {
+    return (
+        <div className="space-y-3" aria-busy="true" aria-label="Loading tasks">
+            {[0, 1, 2].map((i) => (
+                <div
+                    key={i}
+                    className="bg-white rounded-2xl border border-slate-100 p-4 animate-pulse space-y-3"
+                >
+                    <div className="h-3 w-24 rounded bg-slate-200" />
+                    <div className="h-5 w-[85%] max-w-[220px] rounded bg-slate-200" />
+                    <div className="h-3 w-40 rounded bg-slate-100" />
+                    <div className="h-3 w-48 rounded bg-slate-100" />
+                    <div className="flex gap-2 pt-1">
+                        <div className="flex-1 h-11 rounded-xl bg-slate-200" />
+                        <div className="w-24 h-11 rounded-xl bg-slate-100" />
+                    </div>
+                </div>
+            ))}
+        </div>
+    );
+}
 
 export default function VolunteerDashboard() {
     const { user } = useAuth();
-    const [tasks, setTasks] = useState<Task[]>([]);
-    const [history, setHistory] = useState<AttendanceRow[]>([]);
-    const [reports, setReports] = useState<ReportRow[]>([]);
-    const [loading, setLoading] = useState(true);
+    const queryClient = useQueryClient();
+    const {
+        data: dashStats,
+        isLoading: statsLoading,
+        isError: statsError,
+    } = useDashboardStats();
+    const {
+        data: activeTasks = [],
+        isPending: tasksPending,
+        isFetching: tasksFetching,
+        isError: tasksQueryError,
+        error: tasksQueryFailure,
+    } = useActiveTasks();
+    const attendance = useAttendanceSummary();
+    const reportSummary = useReportSummary();
+    const {
+        data: history = [],
+        isPending: historyPending,
+        isError: historyError,
+        error: historyFailure,
+    } = useQuery({
+        queryKey: attendanceHistoryKey,
+        queryFn: async () => {
+            const { data } = await api.get<AttendanceRow[]>('/attendance/my-history');
+            return Array.isArray(data) ? data : [];
+        },
+        staleTime: 20_000,
+    });
+    const { data: reportRows = [], isPending: reportsPending } = useQuery({
+        queryKey: myReportsKey,
+        queryFn: async () => (await api.get<ReportRow[]>('/reports/my-reports')).data,
+        staleTime: 60_000,
+    });
+
     const [clocking, setClocking] = useState<string | null>(null);
-    const [clockAction, setClockAction] = useState<'in' | 'out' | null>(null);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-    const fetchAll = useCallback(async () => {
-        try {
-            setLoading(true);
-            const [tasksRes, histRes, repRes] = await Promise.all([
-                api.get('/tasks/my-tasks'),
-                api.get('/attendance/my-history'),
-                api.get('/reports/my-reports'),
-            ]);
-            setTasks(tasksRes.data);
-            setHistory(histRes.data);
-            setReports(repRes.data);
-        } catch (err) {
-            console.error(err);
-        } finally {
-            setLoading(false);
-        }
-    }, []);
+    const refetchAfterClock = useCallback(async () => {
+        await Promise.all([
+            queryClient.invalidateQueries({ queryKey: attendanceHistoryKey }),
+            queryClient.invalidateQueries({ queryKey: attendanceSummaryQueryKey }),
+            queryClient.invalidateQueries({ queryKey: volunteerActiveTasksQueryKey }),
+            queryClient.invalidateQueries({ queryKey: volunteerDashboardQueryKey }),
+        ]);
+    }, [queryClient]);
 
     useEffect(() => {
-        fetchAll();
-    }, [fetchAll]);
+        if (statsError) {
+            toast.error('Could not load dashboard stats. Showing zeros until retry.');
+        }
+    }, [statsError]);
 
     const getDeviceId = () => {
         let deviceId = localStorage.getItem('device_id');
@@ -149,56 +180,47 @@ export default function VolunteerDashboard() {
         setErrorMsg(null);
         setSuccessMsg(null);
         setClocking(taskId);
-        setClockAction(kind);
 
         if (!navigator.geolocation) {
             setErrorMsg('Geolocation not supported by your browser.');
             setClocking(null);
-            setClockAction(null);
             return;
         }
 
         navigator.geolocation.getCurrentPosition(
             async (position) => {
                 try {
-                    const payload = {
+                    const payload = buildAttendanceClockPayload(
                         taskId,
-                        lat: position.coords.latitude,
-                        lng: position.coords.longitude,
-                        accuracyMeters: position.coords.accuracy,
-                        uniqueRequestId: `REQ_${uuidv4()}`,
-                        deviceId: getDeviceId(),
-                    };
+                        position,
+                        getDeviceId(),
+                        `REQ_${uuidv4()}`,
+                    );
                     await api.post(kind === 'in' ? '/attendance/clock-in' : '/attendance/clock-out', payload);
                     setSuccessMsg(kind === 'in' ? 'Clocked in — GPS verified.' : 'Clocked out — shift logged.');
-                    await fetchAll();
+                    await refetchAfterClock();
                 } catch (error: unknown) {
-                    const msg = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
-                    setErrorMsg(msg || `Failed to clock ${kind}.`);
+                    setErrorMsg(getApiErrorMessage(error, `Failed to clock ${kind}.`));
                 } finally {
                     setClocking(null);
-                    setClockAction(null);
                 }
             },
             (error) => {
                 setErrorMsg('GPS Error: ' + error.message);
                 setClocking(null);
-                setClockAction(null);
             },
             { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
         );
     };
 
-    const stats = computeStats(history, tasks, reports);
-    const activeTasks = tasks.filter((t) => t.status !== 'COMPLETED');
-    const recentReports = reports.slice(0, 5);
+    const recentReports = reportRows.slice(0, 5);
+    const auxReady = !historyPending && !reportsPending;
 
     const today = new Date();
     const dateStr = today.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' });
 
     return (
         <div className="min-h-screen bg-[#F0F7F4] pb-20">
-            {/* Hero Header */}
             <div className="bg-[#1B5E20] text-white px-5 pt-12 pb-8 rounded-b-[2.5rem] shadow-xl relative overflow-hidden">
                 <div className="absolute -top-16 -right-16 w-56 h-56 bg-white/[0.04] rounded-full pointer-events-none" />
                 <div className="absolute top-24 -left-10 w-40 h-40 bg-emerald-400/10 rounded-full pointer-events-none" />
@@ -213,26 +235,43 @@ export default function VolunteerDashboard() {
                             <p className="text-emerald-300 text-sm mt-0.5 font-medium">Ready to make impact today?</p>
                         </div>
                         <div className="w-14 h-14 flex-shrink-0 rounded-2xl bg-white/15 backdrop-blur-sm border border-white/20 flex items-center justify-center text-[1.4rem] font-black shadow-inner select-none">
-                            {user?.firstName?.[0]}{user?.lastName?.[0]}
+                            {user?.firstName?.[0]}
+                            {user?.lastName?.[0]}
                         </div>
                     </div>
 
-                    {!loading && (
-                        <div className="grid grid-cols-4 gap-2 mt-6">
-                            {[
-                                { label: 'Hrs', value: stats.totalHours, icon: Clock },
-                                { label: 'Days', value: stats.attendedDays, icon: CalendarDays },
-                                { label: 'Done', value: stats.completedTasks, icon: CheckCircle },
-                                { label: 'Streak', value: `${stats.streak}d`, icon: Zap },
+                    <div className="grid grid-cols-4 gap-2 mt-6 min-h-[5.5rem]">
+                        {statsLoading ? (
+                            <>
+                                {[0, 1, 2, 3].map((i) => (
+                                    <div
+                                        key={i}
+                                        className="bg-white/10 rounded-2xl p-3 text-center backdrop-blur-sm border border-white/10 animate-pulse"
+                                    >
+                                        <div className="w-4 h-4 mx-auto mb-1 rounded bg-white/20" />
+                                        <div className="h-5 w-10 mx-auto rounded bg-white/20 mb-1" />
+                                        <div className="h-2 w-8 mx-auto rounded bg-white/10" />
+                                    </div>
+                                ))}
+                            </>
+                        ) : (
+                            [
+                                { label: 'Month', value: `${dashStats?.totalHours ?? 0} HRS`, icon: Clock },
+                                { label: 'Active', value: `${dashStats?.activeDays ?? 0} DAYS`, icon: CalendarDays },
+                                { label: 'Done', value: String(dashStats?.tasksCompleted ?? 0), icon: CheckCircle },
+                                { label: 'Streak', value: `${dashStats?.streakDays ?? 0}d`, icon: Zap },
                             ].map(({ label, value, icon: Icon }) => (
-                                <div key={label} className="bg-white/10 rounded-2xl p-3 text-center backdrop-blur-sm border border-white/10">
+                                <div
+                                    key={label}
+                                    className="bg-white/10 rounded-2xl p-3 text-center backdrop-blur-sm border border-white/10"
+                                >
                                     <Icon className="w-4 h-4 mx-auto mb-1 text-emerald-300" />
-                                    <p className="text-[1.1rem] font-black leading-none">{value}</p>
+                                    <p className="text-[0.7rem] sm:text-[1.05rem] font-black leading-tight tabular-nums">{value}</p>
                                     <p className="text-[8px] font-bold text-emerald-200 uppercase tracking-wider mt-0.5">{label}</p>
                                 </div>
-                            ))}
-                        </div>
-                    )}
+                            ))
+                        )}
+                    </div>
                 </div>
             </div>
 
@@ -249,109 +288,85 @@ export default function VolunteerDashboard() {
                         <p>{successMsg}</p>
                     </div>
                 )}
+                {historyError && (
+                    <div className="bg-amber-50 text-amber-900 p-4 rounded-2xl text-sm font-medium border border-amber-100">
+                        <p className="font-bold">Could not load attendance history</p>
+                        <p className="mt-1 text-amber-800">
+                            {getApiErrorMessage(historyFailure, 'Clock-in state may be wrong until this loads.')}
+                        </p>
+                        <button
+                            type="button"
+                            onClick={() => queryClient.invalidateQueries({ queryKey: attendanceHistoryKey })}
+                            className="mt-3 text-sm font-bold text-amber-950 underline"
+                        >
+                            Retry
+                        </button>
+                    </div>
+                )}
 
-                {/* Active Deployments */}
                 <section>
-                    <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center justify-between mb-3 gap-2">
                         <h2 className="text-[11px] font-extrabold text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                            <MapPin className="w-3.5 h-3.5 text-emerald-500" />
+                            <MapPin className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
                             Active Deployments
+                            {tasksFetching && !tasksPending ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-500" aria-hidden />
+                            ) : null}
                         </h2>
-                        <Link href="/volunteer/tasks" className="text-xs font-bold text-emerald-600 flex items-center gap-1">
-                            All tasks <ChevronRight className="w-3.5 h-3.5" />
+                        <Link
+                            href="/volunteer/tasks"
+                            className="text-xs font-bold text-emerald-600 flex items-center gap-1 shrink-0"
+                        >
+                            View all tasks
+                            <ChevronRight className="w-3.5 h-3.5" />
                         </Link>
                     </div>
 
-                    {loading ? (
-                        <div className="py-16 flex flex-col items-center justify-center text-slate-400">
-                            <Loader2 className="w-7 h-7 animate-spin mb-3 text-emerald-500" />
-                            <span className="text-[10px] font-bold uppercase tracking-widest">Loading assignments…</span>
+                    {tasksQueryError ? (
+                        <div className="bg-red-50 text-red-800 p-4 rounded-2xl text-sm font-medium border border-red-100">
+                            <p className="font-bold">Could not load your tasks</p>
+                            <p className="mt-1 text-red-700">
+                                {getApiErrorMessage(tasksQueryFailure, 'Request failed. Try Refresh list or sign in again.')}
+                            </p>
+                            <button
+                                type="button"
+                                onClick={() => queryClient.invalidateQueries({ queryKey: volunteerActiveTasksQueryKey })}
+                                className="mt-3 text-sm font-bold text-red-900 underline"
+                            >
+                                Retry
+                            </button>
                         </div>
+                    ) : tasksPending ? (
+                        <DeploymentsSkeleton />
                     ) : activeTasks.length === 0 ? (
                         <div className="bg-white rounded-3xl p-10 text-center shadow-sm border border-slate-100">
                             <div className="w-16 h-16 bg-emerald-50 rounded-full flex items-center justify-center mx-auto mb-4">
                                 <Target className="w-8 h-8 text-emerald-300" />
                             </div>
-                            <p className="font-bold text-slate-700 mb-1">No active deployments</p>
-                            <p className="text-sm text-slate-400">Enjoy your free time today!</p>
+                            <p className="font-bold text-slate-700 mb-1">No tasks assigned</p>
+                            <p className="text-sm text-slate-400">
+                                When your coordinator assigns you to a field task, it will show up here.
+                            </p>
+                            <button
+                                type="button"
+                                onClick={() => queryClient.invalidateQueries({ queryKey: volunteerActiveTasksQueryKey })}
+                                className="mt-4 text-sm font-bold text-emerald-600 underline"
+                            >
+                                Refresh list
+                            </button>
                         </div>
                     ) : (
                         <div className="space-y-3">
-                            {activeTasks.slice(0, 3).map((task) => {
-                                const last = lastTodayAttendanceForTask(history, task.id);
-                                const busy = clocking === task.id;
-                                const isIn = last === 'CLOCK_IN';
-                                const isDone = last === 'CLOCK_OUT';
-
-                                return (
-                                    <div
-                                        key={task.id}
-                                        className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden"
-                                    >
-                                        <div className="p-4">
-                                            <div className="flex items-start justify-between gap-2 mb-3">
-                                                <div className="flex-1 min-w-0">
-                                                    <div className="flex items-center gap-2 mb-1">
-                                                        <span className={`w-2 h-2 rounded-full flex-shrink-0 ${PRIORITY_DOT[task.priority || 'LOW']}`} />
-                                                        <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400">
-                                                            {task.template?.replace('_', ' ')}
-                                                        </span>
-                                                    </div>
-                                                    <Link href={`/volunteer/task/${task.id}`}>
-                                                        <h3 className="font-bold text-slate-800 text-[15px] leading-tight hover:text-emerald-700 transition-colors">
-                                                            {task.title}
-                                                        </h3>
-                                                    </Link>
-                                                    <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-1 font-medium">
-                                                        <MapPin className="w-3 h-3" />{task.zoneName}
-                                                    </p>
-                                                </div>
-                                                {isDone ? (
-                                                    <span className="text-[9px] font-bold bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-full border border-emerald-100 flex-shrink-0">
-                                                        Completed
-                                                    </span>
-                                                ) : isIn ? (
-                                                    <span className="text-[9px] font-bold bg-amber-50 text-amber-700 px-2.5 py-1 rounded-full border border-amber-200 flex items-center gap-1 flex-shrink-0">
-                                                        <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" />
-                                                        Active
-                                                    </span>
-                                                ) : null}
-                                            </div>
-
-                                            <div className="flex gap-2">
-                                                {!isDone && (
-                                                    <button
-                                                        onClick={() => attemptClock(task.id, isIn ? 'out' : 'in')}
-                                                        disabled={busy || clocking !== null}
-                                                        className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all active:scale-[0.97] flex items-center justify-center gap-2 shadow-sm disabled:opacity-60 ${
-                                                            isIn
-                                                                ? 'bg-amber-500 text-white'
-                                                                : 'bg-[#388E3C] text-white'
-                                                        }`}
-                                                    >
-                                                        {busy ? (
-                                                            <Loader2 className="w-4 h-4 animate-spin" />
-                                                        ) : (
-                                                            <>
-                                                                <Clock className="w-4 h-4" />
-                                                                {isIn ? 'Clock Out' : 'Clock In'}
-                                                            </>
-                                                        )}
-                                                    </button>
-                                                )}
-                                                <Link
-                                                    href={`/volunteer/task/${task.id}/camera`}
-                                                    className="px-4 py-3 rounded-xl border-2 border-emerald-200 text-emerald-700 font-bold text-sm flex items-center gap-1.5 bg-emerald-50/60 active:scale-[0.97] transition-transform"
-                                                >
-                                                    <Camera className="w-4 h-4" />
-                                                    {isDone ? 'Report' : 'Photo'}
-                                                </Link>
-                                            </div>
-                                        </div>
-                                    </div>
-                                );
-                            })}
-
+                            {activeTasks.slice(0, 3).map((task) => (
+                                <VolunteerDeploymentCard
+                                    key={task.id}
+                                    task={task}
+                                    lastTodayType={lastTodayAttendanceForTask(history, task.id)}
+                                    clockBusy={clocking === task.id}
+                                    anyClockBusy={clocking !== null}
+                                    onClock={attemptClock}
+                                />
+                            ))}
                             {activeTasks.length > 3 && (
                                 <Link
                                     href="/volunteer/tasks"
@@ -365,8 +380,7 @@ export default function VolunteerDashboard() {
                     )}
                 </section>
 
-                {/* Recent Reports */}
-                {!loading && recentReports.length > 0 && (
+                {auxReady && recentReports.length > 0 && (
                     <section>
                         <div className="flex items-center justify-between mb-3">
                             <h2 className="text-[11px] font-extrabold text-slate-500 uppercase tracking-widest flex items-center gap-2">
@@ -381,11 +395,19 @@ export default function VolunteerDashboard() {
                             {recentReports.map((r) => (
                                 <div key={r.id} className="px-4 py-3 flex items-center justify-between gap-3">
                                     <div className="flex-1 min-w-0">
-                                        <p className="font-semibold text-slate-800 text-sm truncate">{r.task?.title || 'Field Report'}</p>
+                                        <p className="font-semibold text-slate-800 text-sm truncate">
+                                            {r.task?.title || 'Field Report'}
+                                        </p>
                                         <p className="text-[10px] text-slate-400 mt-0.5">
-                                            {new Date(r.timestamp).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                                            {new Date(r.timestamp).toLocaleDateString('en-IN', {
+                                                day: 'numeric',
+                                                month: 'short',
+                                            })}
                                             {' · '}
-                                            {new Date(r.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                            {new Date(r.timestamp).toLocaleTimeString(undefined, {
+                                                hour: '2-digit',
+                                                minute: '2-digit',
+                                            })}
                                         </p>
                                     </div>
                                     <span
@@ -405,31 +427,145 @@ export default function VolunteerDashboard() {
                     </section>
                 )}
 
-                {/* Quick Access */}
-                {!loading && (
-                    <section>
-                        <h2 className="text-[11px] font-extrabold text-slate-500 uppercase tracking-widest mb-3">Quick Access</h2>
-                        <div className="grid grid-cols-2 gap-3">
-                            {[
-                                { href: '/volunteer/attendance', label: 'Attendance History', icon: CalendarDays, iconBg: 'bg-blue-50', iconColor: 'text-blue-600', border: 'border-blue-100' },
-                                { href: '/volunteer/reports', label: 'My Reports', icon: ClipboardList, iconBg: 'bg-purple-50', iconColor: 'text-purple-600', border: 'border-purple-100' },
-                                { href: '/volunteer/profile', label: 'Leaves & Profile', icon: CheckCircle, iconBg: 'bg-amber-50', iconColor: 'text-amber-600', border: 'border-amber-100' },
-                                { href: '/volunteer/tasks', label: 'All Tasks', icon: Target, iconBg: 'bg-emerald-50', iconColor: 'text-emerald-600', border: 'border-emerald-100' },
-                            ].map(({ href, label, icon: Icon, iconBg, iconColor, border }) => (
-                                <Link
-                                    key={href}
-                                    href={href}
-                                    className="flex items-center gap-3 p-4 rounded-2xl bg-white border border-slate-100 shadow-sm active:scale-[0.97] transition-transform"
-                                >
-                                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center border ${iconBg} ${border}`}>
-                                        <Icon className={`w-4 h-4 ${iconColor}`} />
+                <section>
+                    <h2 className="text-[11px] font-extrabold text-slate-500 uppercase tracking-widest mb-3 flex items-center gap-2">
+                        <Zap className="w-3.5 h-3.5 text-emerald-500 shrink-0" aria-hidden />
+                        Quick Access
+                    </h2>
+                    <div className="grid grid-cols-2 gap-3">
+                        {attendance.isPending ? (
+                            <QuickAccessSummarySkeleton />
+                        ) : (
+                            <Link
+                                href="../attendance"
+                                className="group flex flex-col gap-1.5 p-4 rounded-2xl bg-white border border-slate-100 shadow-sm hover:shadow-md hover:border-slate-200 active:scale-[0.98] transition-all duration-200 text-left"
+                            >
+                                <div className="flex items-start gap-3">
+                                    <div
+                                        className="w-9 h-9 rounded-xl flex items-center justify-center border bg-blue-50 border-blue-100 group-hover:bg-blue-100/90 transition-colors shrink-0"
+                                        aria-hidden
+                                    >
+                                        <CalendarDays className="w-4 h-4 text-blue-600" />
                                     </div>
-                                    <span className="text-xs font-bold text-slate-700 leading-tight">{label}</span>
-                                </Link>
-                            ))}
-                        </div>
-                    </section>
-                )}
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-xs font-bold text-slate-800 leading-tight">
+                                            Attendance History
+                                        </p>
+                                        {attendance.isError ? (
+                                            <p className="text-[11px] text-slate-400 mt-1.5">
+                                                Couldn&apos;t load summary. Tap to open history.
+                                            </p>
+                                        ) : (
+                                            <>
+                                                <p className="text-[11px] text-slate-500 mt-1.5">
+                                                    Last check-in:{' '}
+                                                    <span className="font-semibold text-slate-700 tabular-nums">
+                                                        {formatLastCheckInTime(
+                                                            attendance.data?.lastCheckIn ?? null,
+                                                        )}
+                                                    </span>
+                                                </p>
+                                                <p className="text-[11px] font-semibold text-slate-600 mt-0.5 tabular-nums">
+                                                    {attendance.data?.totalEntries ?? 0} entries
+                                                </p>
+                                            </>
+                                        )}
+                                    </div>
+                                    <ChevronRight
+                                        className="w-4 h-4 text-slate-300 group-hover:text-emerald-600 shrink-0 mt-0.5 transition-colors"
+                                        aria-hidden
+                                    />
+                                </div>
+                            </Link>
+                        )}
+
+                        {reportSummary.isPending ? (
+                            <QuickAccessSummarySkeleton />
+                        ) : (
+                            <Link
+                                href="../reports"
+                                className="group flex flex-col gap-1.5 p-4 rounded-2xl bg-white border border-slate-100 shadow-sm hover:shadow-md hover:border-slate-200 active:scale-[0.98] transition-all duration-200 text-left"
+                            >
+                                <div className="flex items-start gap-3">
+                                    <div
+                                        className="w-9 h-9 rounded-xl flex items-center justify-center border bg-purple-50 border-purple-100 group-hover:bg-purple-100/90 transition-colors shrink-0"
+                                        aria-hidden
+                                    >
+                                        <ClipboardList className="w-4 h-4 text-purple-600" />
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-xs font-bold text-slate-800 leading-tight">My Reports</p>
+                                        {reportSummary.isError ? (
+                                            <p className="text-[11px] text-slate-400 mt-1.5">
+                                                Couldn&apos;t load summary. Tap to open reports.
+                                            </p>
+                                        ) : (
+                                            <>
+                                                <p className="text-[11px] font-semibold text-slate-700 mt-1.5 tabular-nums">
+                                                    {reportSummary.data?.totalReports ?? 0} reports
+                                                </p>
+                                                <p className="text-[11px] text-slate-500 mt-0.5">
+                                                    <span className="font-semibold text-emerald-700">
+                                                        {reportSummary.data?.approvedCount ?? 0} approved
+                                                    </span>
+                                                    {' / '}
+                                                    <span className="font-semibold text-amber-700">
+                                                        {reportSummary.data?.pendingCount ?? 0} pending
+                                                    </span>
+                                                    {(reportSummary.data?.rejectedCount ?? 0) > 0 ? (
+                                                        <span className="text-slate-400">
+                                                            {' · '}
+                                                            {reportSummary.data?.rejectedCount} rejected
+                                                        </span>
+                                                    ) : null}
+                                                </p>
+                                            </>
+                                        )}
+                                    </div>
+                                    <ChevronRight
+                                        className="w-4 h-4 text-slate-300 group-hover:text-emerald-600 shrink-0 mt-0.5 transition-colors"
+                                        aria-hidden
+                                    />
+                                </div>
+                            </Link>
+                        )}
+
+                        {[
+                            {
+                                href: '/volunteer/profile',
+                                label: 'Leaves & Profile',
+                                icon: CheckCircle,
+                                iconBg: 'bg-amber-50',
+                                iconColor: 'text-amber-600',
+                                border: 'border-amber-100',
+                            },
+                            {
+                                href: '/volunteer/tasks',
+                                label: 'All Tasks',
+                                icon: Target,
+                                iconBg: 'bg-emerald-50',
+                                iconColor: 'text-emerald-600',
+                                border: 'border-emerald-100',
+                            },
+                        ].map(({ href, label, icon: Icon, iconBg, iconColor, border }) => (
+                            <Link
+                                key={href}
+                                href={href}
+                                className="group flex items-center gap-3 p-4 rounded-2xl bg-white border border-slate-100 shadow-sm hover:shadow-md hover:border-slate-200 active:scale-[0.98] transition-all duration-200"
+                            >
+                                <div
+                                    className={`w-9 h-9 rounded-xl flex items-center justify-center border ${iconBg} ${border} group-hover:opacity-90 transition-opacity`}
+                                >
+                                    <Icon className={`w-4 h-4 ${iconColor}`} />
+                                </div>
+                                <span className="text-xs font-bold text-slate-700 leading-tight flex-1 min-w-0">
+                                    {label}
+                                </span>
+                                <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-emerald-600 shrink-0 transition-colors" />
+                            </Link>
+                        ))}
+                    </div>
+                </section>
             </div>
         </div>
     );

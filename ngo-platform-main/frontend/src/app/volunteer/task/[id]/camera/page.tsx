@@ -3,11 +3,15 @@
 import { useState, useRef, useEffect, use } from 'react';
 import { Camera, RefreshCcw, Check, Loader2, X, AlertCircle } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import api from '../../../../../lib/axios';
+import { useQueryClient } from '@tanstack/react-query';
+import api from '@/lib/api/client';
+import { getApiErrorMessage } from '@/lib/api-errors';
 import { useAuth } from '../../../../../context/AuthContext';
+import { reportSummaryQueryKey } from '@/features/volunteer/hooks/useReportSummary';
 
 export default function FieldReportCamera({ params }: { params: Promise<{ id: string }> }) {
     const router = useRouter();
+    const queryClient = useQueryClient();
     const { user } = useAuth();
     const unwrappedParams = use(params);
 
@@ -99,25 +103,59 @@ export default function FieldReportCamera({ params }: { params: Promise<{ id: st
     };
 
     const submitReport = async () => {
+        if (!beforeImage || !afterImage) {
+            setErrorMsg('Please capture both before and after photos.');
+            return;
+        }
         try {
             setIsSubmitting(true);
 
-            // In a real app we'd upload base64 to S3 and post URL. 
-            // For this MVP, we post the Data URI directly (Backend expects String).
-            const payload = {
-                taskId: unwrappedParams.id, // using params from URL
-                beforePhotoUrl: beforeImage,
-                afterPhotoUrl: afterImage,
-                quantityItems: parseInt(quantity) || 0,
-                notes: notes
+            const n = parseInt(quantity, 10);
+            const wasteCollected = Number.isFinite(n) && n >= 0 ? n : 0;
+
+            const payload: Record<string, string | number> = {
+                taskId: unwrappedParams.id,
+                beforeImageUrl: beforeImage,
+                afterImageUrl: afterImage,
+                wasteCollected,
             };
+            if (notes.trim()) payload.notes = notes.trim();
+
+            await new Promise<void>((resolve) => {
+                let settled = false;
+                const done = () => {
+                    if (settled) return;
+                    settled = true;
+                    resolve();
+                };
+                const timer = window.setTimeout(done, 4500);
+                if (!navigator.geolocation) {
+                    window.clearTimeout(timer);
+                    done();
+                    return;
+                }
+                navigator.geolocation.getCurrentPosition(
+                    (pos) => {
+                        payload.latitude = pos.coords.latitude;
+                        payload.longitude = pos.coords.longitude;
+                        window.clearTimeout(timer);
+                        done();
+                    },
+                    () => {
+                        window.clearTimeout(timer);
+                        done();
+                    },
+                    { enableHighAccuracy: false, timeout: 4000, maximumAge: 60_000 },
+                );
+            });
 
             await api.post('/reports', payload);
+            await queryClient.invalidateQueries({ queryKey: reportSummaryQueryKey });
 
             // Conclude Ops
             router.push('/volunteer/dashboard');
-        } catch (err: any) {
-            setErrorMsg(err.response?.data?.message || 'Failed to submit report');
+        } catch (err: unknown) {
+            setErrorMsg(getApiErrorMessage(err, 'Failed to submit report'));
         } finally {
             setIsSubmitting(false);
         }

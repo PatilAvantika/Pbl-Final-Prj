@@ -44,10 +44,17 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
       connectionString = normalizePostgresUrl(connectionString);
     }
 
+    // Neon (and other serverless Postgres) cold starts often exceed 20s; short timeouts surface as
+    // "Connection terminated due to connection timeout" mid-request.
+    const connectionTimeoutMillis = Number(process.env.DATABASE_CONNECTION_TIMEOUT_MS) || 90_000;
+    const poolMax = Number(process.env.DATABASE_POOL_MAX) || 10;
+
     const pool = new Pool({
       connectionString,
-      connectionTimeoutMillis: 20_000,
-      max: 10,
+      connectionTimeoutMillis,
+      max: poolMax,
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 10_000,
     });
     const adapter = new PrismaPg(pool);
     super({ adapter });

@@ -60,6 +60,7 @@ export class HrController {
     ) { }
 
     // --- LEAVES ---
+    @Roles(Role.VOLUNTEER)
     @Post('leaves')
     requestLeave(@Request() req: any, @Body() data: RequestLeaveDto) {
         return this.hrService.requestLeave(req.user.id, {
@@ -70,27 +71,46 @@ export class HrController {
         } as any);
     }
 
+    @Roles(Role.VOLUNTEER)
     @Get('leaves/my-leaves')
     getMyLeaves(@Request() req: any) {
         return this.hrService.getMyLeaves(req.user.id);
     }
 
-    @Roles(Role.SUPER_ADMIN, Role.HR_MANAGER, Role.NGO_ADMIN)
+    @Roles(
+        Role.SUPER_ADMIN,
+        Role.HR_MANAGER,
+        Role.NGO_ADMIN,
+        Role.FIELD_COORDINATOR,
+        Role.FINANCE_MANAGER,
+    )
     @Get('leaves/all')
-    getAllLeaves(@Query() query: LeaveListQueryDto) {
-        return this.hrService.getAllLeaves(query);
+    getAllLeaves(@Query() query: LeaveListQueryDto, @Request() req: any) {
+        return this.hrService.getAllLeaves(query, {
+            organizationId: req.user?.organizationId ?? null,
+            role: req.user.role,
+        });
     }
 
+    @Roles(Role.VOLUNTEER)
     @Delete('leaves/:id')
     @HttpCode(HttpStatus.NO_CONTENT)
     cancelLeave(@Param('id') leaveId: string, @Request() req: any) {
         return this.hrService.cancelLeave(leaveId, req.user.id);
     }
 
-    @Roles(Role.SUPER_ADMIN, Role.HR_MANAGER, Role.NGO_ADMIN)
+    @Roles(
+        Role.SUPER_ADMIN,
+        Role.HR_MANAGER,
+        Role.NGO_ADMIN,
+        Role.FIELD_COORDINATOR,
+    )
     @Put('leaves/:id/status')
     async updateLeaveStatus(@Param('id') leaveId: string, @Body() data: UpdateLeaveStatusDto, @Request() req: any) {
-        const leave = await this.hrService.updateLeaveStatus(leaveId, data.status);
+        const leave = await this.hrService.updateLeaveStatus(leaveId, data.status, {
+            organizationId: req.user?.organizationId ?? null,
+            role: req.user.role,
+        });
         await this.auditService.log({
             actorId: req.user?.id,
             action: AuditAction.LEAVE_STATUS_UPDATED,
@@ -102,6 +122,7 @@ export class HrController {
     }
 
     // --- PAYROLL / PAYSLIPS ---
+    @Roles(Role.VOLUNTEER)
     @Get('payslips/my-payslips')
     getMyPayslips(@Request() req: any) {
         return this.hrService.getMyPayslips(req.user.id);

@@ -19,12 +19,12 @@ export declare class AuditService {
         metadata?: Prisma.InputJsonValue;
     }): Promise<{
         id: string;
+        createdAt: Date;
         actorId: string | null;
         action: import("@prisma/client").$Enums.AuditAction;
         entityType: string;
         entityId: string;
         metadata: Prisma.JsonValue | null;
-        createdAt: Date;
     }>;
     findAll(query?: AuditListQuery): Promise<({
         actor: {
@@ -36,11 +36,11 @@ export declare class AuditService {
         } | null;
     } & {
         id: string;
+        createdAt: Date;
         actorId: string | null;
         action: import("@prisma/client").$Enums.AuditAction;
         entityType: string;
         entityId: string;
         metadata: Prisma.JsonValue | null;
-        createdAt: Date;
     })[]>;
 }

@@ -6,7 +6,11 @@ import {
     NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { Prisma, Role, Task, TaskAssignment, TaskTemplate } from '@prisma/client';
+import { Prisma, Role, Task, TaskAssignment, TaskLifecycleStatus, TaskTemplate } from '@prisma/client';
+import { TaskAssignmentOrchestratorService } from '../field-ops/services/task-assignment-orchestrator.service';
+import { TaskLifecycleService } from '../field-ops/services/task-lifecycle.service';
+import type { AssignmentMode } from '../field-ops/domain/task-assignment/assignment-strategy.interface';
+import type { PatchTaskDto } from './dto/patch-task.dto';
 
 const TASK_DETAIL_PRIVILEGED_ROLES: Role[] = [
     Role.SUPER_ADMIN,
@@ -22,11 +26,28 @@ export interface TaskListQuery {
     search?: string;
     template?: TaskTemplate;
     isActive?: boolean;
+    organizationId: string;
 }
+
+const ASSIGN_PATCH_ROLES: Role[] = [
+    Role.SUPER_ADMIN,
+    Role.NGO_ADMIN,
+    Role.FIELD_COORDINATOR,
+    Role.TEAM_LEADER,
+];
+
+export type TaskWithAssignments = Task & {
+    teamLeaderId: string | null;
+    assignments: { userId: string; user: { firstName: string; lastName: string; role: Role } }[];
+};
 
 @Injectable()
 export class TasksService {
-    constructor(private prisma: PrismaService) { }
+    constructor(
+        private prisma: PrismaService,
+        private readonly assignmentOrchestrator: TaskAssignmentOrchestratorService,
+        private readonly taskLifecycle: TaskLifecycleService,
+    ) {}
 
     private assertEndAfterStart(start: Date, end: Date): void {
         if (end.getTime() <= start.getTime()) {
@@ -116,12 +137,13 @@ export class TasksService {
         return this.prisma.task.create({ data });
     }
 
-    async findAll(query: TaskListQuery = {}): Promise<Task[]> {
+    async findAll(query: TaskListQuery): Promise<Task[]> {
         const page = query.page ?? 1;
         const limit = query.limit ?? 20;
         const skip = (page - 1) * limit;
         return this.prisma.task.findMany({
             where: {
+                organizationId: query.organizationId,
                 template: query.template,
                 isActive: query.isActive,
                 OR: query.search
@@ -140,53 +162,129 @@ export class TasksService {
         });
     }
 
-    async findOne(id: string): Promise<Task> {
-        const task = await this.prisma.task.findUnique({
-            where: { id },
+    async findOneInOrganization(id: string, organizationId: string): Promise<TaskWithAssignments> {
+        const task = await this.prisma.task.findFirst({
+            where: { id, organizationId },
             include: { assignments: { include: { user: { select: { id: true, firstName: true, lastName: true, role: true } } } } }
         });
         if (!task) throw new NotFoundException('Task not found');
         return task;
     }
 
-    /** Task detail: privileged roles see all tasks; others only if assigned. */
-    async findOneForRequester(id: string, requesterId: string, requesterRole: Role): Promise<Task> {
-        if (TASK_DETAIL_PRIVILEGED_ROLES.includes(requesterRole)) {
-            return this.findOne(id);
+    /** Team leaders may manage tasks they lead (`teamLeaderId`) or legacy tasks they are assigned to. */
+    assertTeamLeaderOwnsTask(task: TaskWithAssignments, actorId: string): void {
+        if (task.teamLeaderId) {
+            if (task.teamLeaderId !== actorId) {
+                throw new ForbiddenException('You can only manage tasks you lead');
+            }
+            return;
         }
-        const task = await this.prisma.task.findUnique({
-            where: { id },
+        const assigned = task.assignments.some((a) => a.userId === actorId);
+        if (!assigned) {
+            throw new ForbiddenException('You can only manage tasks you lead');
+        }
+    }
+
+    private assertActorCanManageTaskAssignments(task: TaskWithAssignments, actor?: { id: string; role: Role }): void {
+        if (!actor) return;
+        const privileged: Role[] = [Role.SUPER_ADMIN, Role.NGO_ADMIN, Role.FIELD_COORDINATOR];
+        if (privileged.includes(actor.role)) return;
+        if (actor.role === Role.TEAM_LEADER) {
+            this.assertTeamLeaderOwnsTask(task, actor.id);
+            return;
+        }
+        throw new ForbiddenException('Not allowed to modify task assignments');
+    }
+
+    supervisorRolesForTaskAttendance(): Role[] {
+        return [Role.SUPER_ADMIN, Role.NGO_ADMIN, Role.FIELD_COORDINATOR, Role.HR_MANAGER];
+    }
+
+    assertActorCanViewTaskAttendance(
+        task: TaskWithAssignments,
+        actorId: string,
+        role: Role,
+    ): void {
+        if (this.supervisorRolesForTaskAttendance().includes(role)) return;
+        if (role === Role.TEAM_LEADER) {
+            this.assertTeamLeaderOwnsTask(task, actorId);
+            return;
+        }
+        throw new ForbiddenException('Not allowed to view attendance for this task');
+    }
+
+    /**
+     * Report review: designated `teamLeaderId` must match; if the task has no leader set, any org team leader may review.
+     */
+    async assertTeamLeaderOfTask(taskId: string, organizationId: string, teamLeaderId: string): Promise<void> {
+        const task = (await this.prisma.task.findFirst({
+            where: { id: taskId, organizationId },
+            include: { assignments: true },
+        })) as TaskWithAssignments | null;
+        if (!task) throw new NotFoundException('Task not found');
+        if (task.teamLeaderId != null && task.teamLeaderId !== teamLeaderId) {
+            throw new ForbiddenException('You can only review reports for tasks you lead');
+        }
+    }
+
+    /**
+     * Tasks created by or assigned to this team leader, with assignment and count metadata.
+     */
+    async findTasksForTeamLeader(userId: string, organizationId: string) {
+        return this.prisma.task.findMany({
+            where: {
+                organizationId,
+                OR: [{ teamLeaderId: userId }, { teamLeaderId: null, assignments: { some: { userId } } }],
+            },
+            include: {
+                assignments: {
+                    include: {
+                        user: { select: { id: true, firstName: true, lastName: true, role: true, email: true } },
+                    },
+                },
+                _count: { select: { attendances: true, reports: true } },
+            },
+            orderBy: { startTime: 'desc' },
+        });
+    }
+
+    /** Task detail: privileged roles see tasks in their org; others only if assigned. */
+    async findOneForRequester(
+        id: string,
+        requesterId: string,
+        requesterRole: Role,
+        organizationId: string,
+    ): Promise<Task> {
+        const task = await this.prisma.task.findFirst({
+            where: { id, organizationId },
             include: { assignments: { include: { user: { select: { id: true, firstName: true, lastName: true, role: true } } } } }
         });
         if (!task) throw new NotFoundException('Task not found');
+        if (TASK_DETAIL_PRIVILEGED_ROLES.includes(requesterRole)) {
+            return task as TaskWithAssignments;
+        }
+        if (requesterRole === Role.TEAM_LEADER && task.teamLeaderId === requesterId) {
+            return task as TaskWithAssignments;
+        }
         const isAssigned = task.assignments.some((a) => a.userId === requesterId);
         if (!isAssigned) {
             throw new ForbiddenException('Task not found or access denied');
         }
-        return task;
+        return task as TaskWithAssignments;
     }
 
     /**
-     * Assigned tasks overlapping the current calendar day in the server host local timezone.
-     * Multi-region accurate "today" would need an explicit timezone or user locale (not implemented).
+     * All tasks assigned to the user in this org (including completed / isActive false).
+     * Volunteer UIs filter by lifecycle locally; hiding inactive tasks made assignments disappear after completion or admin toggle.
      */
-    async findAssignedToUser(userId: string): Promise<Task[]> {
-        const now = new Date();
-        const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-        const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-        const assignments = await this.prisma.taskAssignment.findMany({
+    async findAssignedToUser(userId: string, organizationId: string): Promise<Task[]> {
+        return this.prisma.task.findMany({
             where: {
-                userId,
-                task: {
-                    isActive: true,
-                    startTime: { lte: endOfDay },
-                    endTime: { gte: startOfDay },
-                },
+                organizationId,
+                assignments: { some: { userId } },
             },
-            include: { task: true },
-            orderBy: { task: { startTime: 'asc' } },
+            orderBy: { startTime: 'desc' },
         });
-        return assignments.map((a) => a.task);
     }
 
     async assertUserAssignedToTask(userId: string, taskId: string): Promise<void> {
@@ -198,15 +296,24 @@ export class TasksService {
         }
     }
 
-    async assignUserToTask(taskId: string, userId: string): Promise<TaskAssignment> {
-        await this.findOne(taskId);
+    async assignUserToTask(
+        taskId: string,
+        userId: string,
+        organizationId: string,
+        actor?: { id: string; role: Role },
+    ): Promise<TaskAssignment> {
+        const task = await this.findOneInOrganization(taskId, organizationId);
+        this.assertActorCanManageTaskAssignments(task, actor);
 
-        const user = await this.prisma.user.findUnique({
-            where: { id: userId },
-            select: { id: true },
+        const user = await this.prisma.user.findFirst({
+            where: { id: userId, organizationId },
+            select: { id: true, role: true },
         });
         if (!user) {
             throw new NotFoundException('User not found');
+        }
+        if (user.role !== Role.VOLUNTEER) {
+            throw new BadRequestException('Only users with role VOLUNTEER can be assigned to field tasks');
         }
 
         const existing = await this.prisma.taskAssignment.findUnique({
@@ -217,12 +324,13 @@ export class TasksService {
         }
 
         try {
-            return await this.prisma.taskAssignment.create({
+            const created = await this.prisma.taskAssignment.create({
                 data: {
                     taskId,
                     userId,
                 },
             });
+            return created;
         } catch (e) {
             if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
                 throw new ConflictException('User is already assigned to this task');
@@ -231,7 +339,14 @@ export class TasksService {
         }
     }
 
-    async removeUserFromTask(taskId: string, userId: string): Promise<void> {
+    async removeUserFromTask(
+        taskId: string,
+        userId: string,
+        organizationId: string,
+        actor?: { id: string; role: Role },
+    ): Promise<void> {
+        const task = await this.findOneInOrganization(taskId, organizationId);
+        this.assertActorCanManageTaskAssignments(task, actor);
         try {
             await this.prisma.taskAssignment.delete({
                 where: { userId_taskId: { userId, taskId } }
@@ -241,8 +356,8 @@ export class TasksService {
         }
     }
 
-    async update(id: string, data: Prisma.TaskUpdateInput): Promise<Task> {
-        const existing = await this.findOne(id);
+    async update(id: string, organizationId: string, data: Prisma.TaskUpdateInput): Promise<Task> {
+        const existing = await this.findOneInOrganization(id, organizationId);
         const start = this.effectiveDateFromUpdatePatch(data.startTime, existing.startTime);
         const end = this.effectiveDateFromUpdatePatch(data.endTime, existing.endTime);
         this.assertEndAfterStart(start, end);
@@ -253,8 +368,117 @@ export class TasksService {
         return this.prisma.task.update({ where: { id }, data });
     }
 
-    async remove(id: string): Promise<Task> {
-        await this.findOne(id);
+    async remove(id: string, organizationId: string): Promise<Task> {
+        await this.findOneInOrganization(id, organizationId);
         return this.prisma.task.delete({ where: { id } });
+    }
+
+    private mapLegacyUiStatus(s?: string): TaskLifecycleStatus | undefined {
+        if (!s) return undefined;
+        const u = s.toUpperCase();
+        if (u === 'IN_PROGRESS') return TaskLifecycleStatus.ACTIVE;
+        if (u === 'PENDING') return TaskLifecycleStatus.PENDING;
+        if (u === 'ACTIVE') return TaskLifecycleStatus.ACTIVE;
+        if (u === 'COMPLETED') return TaskLifecycleStatus.COMPLETED;
+        if (u === 'CANCELLED') return TaskLifecycleStatus.CANCELLED;
+        return undefined;
+    }
+
+    async assignWithStrategy(
+        taskId: string,
+        organizationId: string,
+        actorId: string,
+        role: Role,
+        mode: AssignmentMode,
+        userIds?: string[],
+    ) {
+        if (!ASSIGN_PATCH_ROLES.includes(role)) {
+            throw new ForbiddenException('Not allowed to run assignment strategy');
+        }
+        const task = await this.findOneInOrganization(taskId, organizationId);
+        if (role === Role.TEAM_LEADER) {
+            this.assertTeamLeaderOwnsTask(task, actorId);
+        }
+        return this.assignmentOrchestrator.assign(mode, {
+            taskId,
+            leaderId: actorId,
+            organizationId,
+            userIds,
+        });
+    }
+
+    private patchDtoToPrismaUpdate(dto: PatchTaskDto): Prisma.TaskUpdateInput {
+        const keys = [
+            'title',
+            'description',
+            'template',
+            'zoneName',
+            'geofenceLat',
+            'geofenceLng',
+            'geofenceRadius',
+            'startTime',
+            'endTime',
+            'isActive',
+        ] as const;
+        const out: Prisma.TaskUpdateInput = {};
+        for (const k of keys) {
+            const v = dto[k];
+            if (v !== undefined) {
+                (out as Record<string, unknown>)[k] = v;
+            }
+        }
+        return out;
+    }
+
+    /**
+     * PATCH semantics for team-leader UI: optional lifecycle (or legacy `status`),
+     * optional `assigneeIds` (empty = open task), plus partial task fields.
+     */
+    async patchTeamLeader(
+        id: string,
+        organizationId: string,
+        actorId: string,
+        role: Role,
+        dto: PatchTaskDto,
+    ): Promise<Task> {
+        let task = await this.findOneInOrganization(id, organizationId);
+
+        if (role === Role.TEAM_LEADER) {
+            this.assertTeamLeaderOwnsTask(task, actorId);
+        }
+
+        const { lifecycleStatus, status, assigneeIds } = dto;
+
+        if (assigneeIds !== undefined) {
+            if (!ASSIGN_PATCH_ROLES.includes(role)) {
+                throw new ForbiddenException('Not allowed to change assignments');
+            }
+            if (assigneeIds.length === 0) {
+                await this.assignmentOrchestrator.assign('open', {
+                    taskId: id,
+                    leaderId: actorId,
+                    organizationId,
+                });
+            } else {
+                await this.assignmentOrchestrator.assign('bulk', {
+                    taskId: id,
+                    leaderId: actorId,
+                    organizationId,
+                    userIds: assigneeIds,
+                });
+            }
+            task = await this.findOneInOrganization(id, organizationId);
+        }
+
+        const targetLifecycle = lifecycleStatus ?? this.mapLegacyUiStatus(status);
+        if (targetLifecycle !== undefined) {
+            await this.taskLifecycle.applyTransition(task, targetLifecycle);
+        }
+
+        const rest = this.patchDtoToPrismaUpdate(dto);
+        if (Object.keys(rest).length > 0) {
+            return this.update(id, organizationId, rest);
+        }
+        return this.findOneInOrganization(id, organizationId);
     }
 }

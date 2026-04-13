@@ -1,11 +1,12 @@
 'use client';
 
 import { useState } from 'react';
-import api from '../../../lib/axios';
+import api from '../../../lib/api/client';
 import { Image as ImageIcon, CheckCircle, Package, User, XCircle, Maximize2 } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../../context/AuthContext';
 import { hasPermission } from '../../../lib/permissions';
+import { getApiErrorMessage } from '@/lib/api-errors';
 
 export default function AdminReportsPage() {
     const queryClient = useQueryClient();
@@ -14,9 +15,20 @@ export default function AdminReportsPage() {
     const [statusFilter, setStatusFilter] = useState<'ALL' | 'SUBMITTED' | 'APPROVED' | 'REJECTED'>('ALL');
     const [selectedReport, setSelectedReport] = useState<any | null>(null);
     const [reviewComment, setReviewComment] = useState('');
-    const { data: reports = [], isLoading: loading } = useQuery({
+    const {
+        data: reports = [],
+        isLoading: loading,
+        isError: reportsError,
+        error: reportsFailure,
+        refetch: refetchReports,
+    } = useQuery({
         queryKey: ['admin-reports', statusFilter],
-        queryFn: async () => (await api.get(`/reports?limit=200${statusFilter === 'ALL' ? '' : `&status=${statusFilter}`}`)).data,
+        queryFn: async () => {
+            const { data } = await api.get(
+                `/reports?limit=200${statusFilter === 'ALL' ? '' : `&status=${statusFilter}`}`,
+            );
+            return Array.isArray(data) ? data : [];
+        },
     });
     const { data: reportAuditLogs = [] } = useQuery({
         queryKey: ['report-audit-logs', selectedReport?.id],
@@ -67,6 +79,20 @@ export default function AdminReportsPage() {
             {loading ? (
                 <div className="h-64 flex items-center justify-center bg-white rounded-3xl border border-slate-200">
                     <span className="animate-pulse font-bold text-slate-400">Loading submitted field reports...</span>
+                </div>
+            ) : reportsError ? (
+                <div className="bg-red-50 text-red-800 rounded-3xl border border-red-100 p-6">
+                    <p className="font-bold">Could not load field reports</p>
+                    <p className="mt-2 text-sm text-red-700">
+                        {getApiErrorMessage(reportsFailure, 'Request failed. Check that you are signed in as admin or coordinator.')}
+                    </p>
+                    <button
+                        type="button"
+                        onClick={() => void refetchReports()}
+                        className="mt-4 text-sm font-bold text-red-900 underline"
+                    >
+                        Retry
+                    </button>
                 </div>
             ) : reports.length === 0 ? (
                 <div className="bg-white rounded-3xl border border-slate-200 p-12 text-center text-slate-500 font-medium">

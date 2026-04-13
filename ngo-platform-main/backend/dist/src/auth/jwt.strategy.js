@@ -15,17 +15,20 @@ const passport_1 = require("@nestjs/passport");
 const common_1 = require("@nestjs/common");
 const users_service_1 = require("../users/users.service");
 const auth_constants_1 = require("./auth.constants");
+const auth_constants_2 = require("./auth.constants");
 let JwtStrategy = class JwtStrategy extends (0, passport_1.PassportStrategy)(passport_jwt_1.Strategy) {
     usersService;
     constructor(usersService) {
         const cookieExtractor = (req) => {
             if (!req?.headers?.cookie)
                 return null;
-            const tokenCookie = req.headers.cookie
-                .split(';')
-                .map((v) => v.trim())
-                .find((v) => v.startsWith('token='));
-            return tokenCookie ? decodeURIComponent(tokenCookie.split('=')[1]) : null;
+            const parts = req.headers.cookie.split(';').map((v) => v.trim());
+            const access = parts.find((v) => v.startsWith(`${auth_constants_2.ACCESS_TOKEN_COOKIE}=`));
+            if (access) {
+                return decodeURIComponent(access.split('=').slice(1).join('='));
+            }
+            const legacy = parts.find((v) => v.startsWith(`${auth_constants_2.LEGACY_TOKEN_COOKIE}=`));
+            return legacy ? decodeURIComponent(legacy.split('=').slice(1).join('=')) : null;
         };
         super({
             jwtFromRequest: passport_jwt_1.ExtractJwt.fromExtractors([
@@ -47,7 +50,12 @@ let JwtStrategy = class JwtStrategy extends (0, passport_1.PassportStrategy)(pas
             payload.iat * 1000 < principal.authInvalidatedAt.getTime()) {
             throw new common_1.UnauthorizedException();
         }
-        return { id: principal.id, email: principal.email, role: principal.role };
+        return {
+            id: principal.id,
+            email: principal.email,
+            role: principal.role,
+            organizationId: principal.organizationId,
+        };
     }
 };
 exports.JwtStrategy = JwtStrategy;

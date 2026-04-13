@@ -1,16 +1,26 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, ForbiddenException, Get, Query, Request, UseGuards } from '@nestjs/common';
 import { AppService } from './app.service';
 import { PrismaService } from './prisma/prisma.service';
 import { AuthGuard } from '@nestjs/passport';
 import { RolesGuard } from './auth/roles.guard';
 import { Roles } from './auth/roles.decorator';
 import { Role, SyncStatus } from '@prisma/client';
+import { AdminDashboardService } from './admin/admin-dashboard.service';
+import { AdminMapDataService } from './admin/admin-map-data.service';
+
+function requireOrganizationId(req: { user?: { organizationId?: string } }): string {
+  const id = req.user?.organizationId;
+  if (!id) throw new ForbiddenException('User is not associated with an organization');
+  return id;
+}
 
 @Controller()
 export class AppController {
   constructor(
     private readonly appService: AppService,
     private readonly prisma: PrismaService,
+    private readonly adminDashboard: AdminDashboardService,
+    private readonly adminMapData: AdminMapDataService,
   ) {}
 
   @Get()
@@ -27,6 +37,22 @@ export class AppController {
   async getReady() {
     await this.prisma.$queryRaw`SELECT 1`;
     return { status: 'ready', timestamp: new Date().toISOString() };
+  }
+
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(Role.SUPER_ADMIN, Role.NGO_ADMIN, Role.FIELD_COORDINATOR, Role.HR_MANAGER, Role.FINANCE_MANAGER)
+  @Get('admin/dashboard')
+  async getAdminDashboard(@Request() req: { user?: { organizationId?: string } }) {
+    const organizationId = requireOrganizationId(req);
+    return this.adminDashboard.getDashboardKpis(organizationId);
+  }
+
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(Role.SUPER_ADMIN, Role.NGO_ADMIN, Role.FIELD_COORDINATOR, Role.HR_MANAGER, Role.FINANCE_MANAGER)
+  @Get('admin/map-data')
+  async getAdminMapData(@Request() req: { user?: { organizationId?: string } }) {
+    const organizationId = requireOrganizationId(req);
+    return this.adminMapData.getMapData(organizationId);
   }
 
   @UseGuards(AuthGuard('jwt'), RolesGuard)

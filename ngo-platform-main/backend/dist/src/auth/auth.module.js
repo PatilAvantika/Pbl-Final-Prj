@@ -11,6 +11,7 @@ const common_1 = require("@nestjs/common");
 const auth_service_1 = require("./auth.service");
 const auth_controller_1 = require("./auth.controller");
 const users_module_1 = require("../users/users.module");
+const prisma_module_1 = require("../prisma/prisma.module");
 const passport_1 = require("@nestjs/passport");
 const jwt_1 = require("@nestjs/jwt");
 const jwt_strategy_1 = require("./jwt.strategy");
@@ -21,11 +22,12 @@ exports.AuthModule = AuthModule;
 exports.AuthModule = AuthModule = __decorate([
     (0, common_1.Module)({
         imports: [
+            prisma_module_1.PrismaModule,
             (0, common_1.forwardRef)(() => users_module_1.UsersModule),
             passport_1.PassportModule,
             jwt_1.JwtModule.register({
                 secret: (0, auth_constants_1.getJwtSecret)(),
-                signOptions: { expiresIn: (0, auth_constants_1.getJwtExpiresSec)() },
+                signOptions: { expiresIn: (0, auth_constants_1.getAccessTokenTtlSec)() },
             }),
         ],
         controllers: [auth_controller_1.AuthController],

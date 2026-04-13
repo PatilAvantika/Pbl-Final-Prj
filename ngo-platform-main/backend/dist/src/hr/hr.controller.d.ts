@@ -25,41 +25,41 @@ export declare class HrController {
     private readonly auditService;
     constructor(hrService: HrService, auditService: AuditService);
     requestLeave(req: any, data: RequestLeaveDto): Promise<{
+        status: import("@prisma/client").$Enums.LeaveStatus;
         id: string;
         userId: string;
         type: import("@prisma/client").$Enums.LeaveType;
-        status: import("@prisma/client").$Enums.LeaveStatus;
+        reason: string;
         startDate: Date;
         endDate: Date;
-        reason: string;
     }>;
     getMyLeaves(req: any): Promise<{
+        status: import("@prisma/client").$Enums.LeaveStatus;
         id: string;
         userId: string;
         type: import("@prisma/client").$Enums.LeaveType;
-        status: import("@prisma/client").$Enums.LeaveStatus;
+        reason: string;
         startDate: Date;
         endDate: Date;
-        reason: string;
     }[]>;
-    getAllLeaves(query: LeaveListQueryDto): Promise<{
+    getAllLeaves(query: LeaveListQueryDto, req: any): Promise<{
+        status: import("@prisma/client").$Enums.LeaveStatus;
         id: string;
         userId: string;
         type: import("@prisma/client").$Enums.LeaveType;
-        status: import("@prisma/client").$Enums.LeaveStatus;
+        reason: string;
         startDate: Date;
         endDate: Date;
-        reason: string;
     }[]>;
     cancelLeave(leaveId: string, req: any): Promise<void>;
     updateLeaveStatus(leaveId: string, data: UpdateLeaveStatusDto, req: any): Promise<{
+        status: import("@prisma/client").$Enums.LeaveStatus;
         id: string;
         userId: string;
         type: import("@prisma/client").$Enums.LeaveType;
-        status: import("@prisma/client").$Enums.LeaveStatus;
+        reason: string;
         startDate: Date;
         endDate: Date;
-        reason: string;
     }>;
     getMyPayslips(req: any): Promise<{
         id: string;

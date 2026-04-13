@@ -1,11 +1,31 @@
 @import "tailwindcss";
+@plugin "tailwindcss-animate";
 
 @theme {
   --color-emerald-500: #10b981;
   --color-emerald-600: #059669;
   --color-sky-400: #38bdf8;
   --color-sky-500: #0ea5e9;
-  
+
+  /* Team leader / shared UI tokens (ShadCN-compatible utilities) */
+  --color-background: #fafaf9;
+  --color-foreground: #0f172a;
+  --color-card: #ffffff;
+  --color-card-foreground: #0f172a;
+  --color-primary: #0d9488;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #f1f5f9;
+  --color-secondary-foreground: #0f172a;
+  --color-muted: #f1f5f9;
+  --color-muted-foreground: #64748b;
+  --color-accent: #f1f5f9;
+  --color-accent-foreground: #0f172a;
+  --color-destructive: #ef4444;
+  --color-destructive-foreground: #ffffff;
+  --color-border: #e2e8f0;
+  --color-input: #e2e8f0;
+  --color-ring: #0d9488;
+
   --font-sans: var(--font-inter);
 }
 

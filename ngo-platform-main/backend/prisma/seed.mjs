@@ -34,6 +34,15 @@ function d(dayOffset, hour = 0, min = 0) {
 async function main() {
   const { prisma, pool } = prismaFromEnv();
 
+  const DEFAULT_ORG_ID = '00000000-0000-4000-8000-000000000001';
+
+  // ─── Organization (multi-tenant) ───────────────────────────────────────────
+  await prisma.organization.upsert({
+    where: { slug: 'default' },
+    update: {},
+    create: { id: DEFAULT_ORG_ID, name: 'Default Organization', slug: 'default' },
+  });
+
   // ─── Passwords ───────────────────────────────────────────────────────────────
   const adminPwd  = await bcrypt.hash('Admin@1234', 10);
   const volPwd    = await bcrypt.hash('Volunteer@1234', 10);
@@ -43,44 +52,44 @@ async function main() {
 
   const admin = await prisma.user.upsert({
     where: { email: 'ananya.kapoor@sevasetu.demo' },
-    update: {},
-    create: { email: 'ananya.kapoor@sevasetu.demo', passwordHash: adminPwd, role: 'NGO_ADMIN',         firstName: 'Ananya',  lastName: 'Kapoor',  deviceId: 'device-admin-001', isActive: true },
+    update: { organizationId: DEFAULT_ORG_ID },
+    create: { email: 'ananya.kapoor@sevasetu.demo', passwordHash: adminPwd, role: 'NGO_ADMIN', organizationId: DEFAULT_ORG_ID, firstName: 'Ananya',  lastName: 'Kapoor',  deviceId: 'device-admin-001', isActive: true },
   });
 
   const coord = await prisma.user.upsert({
     where: { email: 'rohan.das@sevasetu.demo' },
-    update: {},
-    create: { email: 'rohan.das@sevasetu.demo',    passwordHash: adminPwd, role: 'FIELD_COORDINATOR', firstName: 'Rohan',   lastName: 'Das',     deviceId: 'device-coord-001', isActive: true },
+    update: { organizationId: DEFAULT_ORG_ID },
+    create: { email: 'rohan.das@sevasetu.demo',    passwordHash: adminPwd, role: 'FIELD_COORDINATOR', organizationId: DEFAULT_ORG_ID, firstName: 'Rohan',   lastName: 'Das',     deviceId: 'device-coord-001', isActive: true },
   });
 
   const priya = await prisma.user.upsert({
     where: { email: 'priya.sharma@sevasetu.demo' },
-    update: {},
-    create: { email: 'priya.sharma@sevasetu.demo', passwordHash: volPwd,   role: 'VOLUNTEER',         firstName: 'Priya',   lastName: 'Sharma',  deviceId: 'device-vol-priya', isActive: true },
+    update: { organizationId: DEFAULT_ORG_ID },
+    create: { email: 'priya.sharma@sevasetu.demo', passwordHash: volPwd,   role: 'VOLUNTEER', organizationId: DEFAULT_ORG_ID, firstName: 'Priya',   lastName: 'Sharma',  deviceId: 'device-vol-priya', isActive: true },
   });
 
   const arjun = await prisma.user.upsert({
     where: { email: 'arjun.mehta@sevasetu.demo' },
-    update: {},
-    create: { email: 'arjun.mehta@sevasetu.demo',  passwordHash: volPwd,   role: 'VOLUNTEER',         firstName: 'Arjun',   lastName: 'Mehta',   deviceId: 'device-vol-arjun', isActive: true },
+    update: { organizationId: DEFAULT_ORG_ID },
+    create: { email: 'arjun.mehta@sevasetu.demo',  passwordHash: volPwd,   role: 'VOLUNTEER', organizationId: DEFAULT_ORG_ID, firstName: 'Arjun',   lastName: 'Mehta',   deviceId: 'device-vol-arjun', isActive: true },
   });
 
   // Keep legacy demo accounts for backward compatibility
   const legacyAdminHash = await bcrypt.hash('Demo1234!', 10);
   await prisma.user.upsert({
     where: { email: 'demo.user1@ngo.local' },
-    update: {},
-    create: { email: 'demo.user1@ngo.local', passwordHash: legacyAdminHash, role: 'NGO_ADMIN',         firstName: 'Demo', lastName: 'Admin', deviceId: 'demo-device-admin' },
+    update: { organizationId: DEFAULT_ORG_ID },
+    create: { email: 'demo.user1@ngo.local', passwordHash: legacyAdminHash, role: 'NGO_ADMIN', organizationId: DEFAULT_ORG_ID, firstName: 'Demo', lastName: 'Admin', deviceId: 'demo-device-admin' },
   });
   await prisma.user.upsert({
     where: { email: 'demo.user2@ngo.local' },
-    update: {},
-    create: { email: 'demo.user2@ngo.local', passwordHash: legacyAdminHash, role: 'FIELD_COORDINATOR', firstName: 'Demo', lastName: 'Field', deviceId: 'demo-device-field' },
+    update: { organizationId: DEFAULT_ORG_ID },
+    create: { email: 'demo.user2@ngo.local', passwordHash: legacyAdminHash, role: 'FIELD_COORDINATOR', organizationId: DEFAULT_ORG_ID, firstName: 'Demo', lastName: 'Field', deviceId: 'demo-device-field' },
   });
   await prisma.user.upsert({
     where: { email: 'volunteer@fieldops.demo' },
-    update: {},
-    create: { email: 'volunteer@fieldops.demo', passwordHash: await bcrypt.hash('password123', 10), role: 'VOLUNTEER', firstName: 'Demo', lastName: 'Volunteer', deviceId: 'demo-device-volunteer' },
+    update: { organizationId: DEFAULT_ORG_ID },
+    create: { email: 'volunteer@fieldops.demo', passwordHash: await bcrypt.hash('password123', 10), role: 'VOLUNTEER', organizationId: DEFAULT_ORG_ID, firstName: 'Demo', lastName: 'Volunteer', deviceId: 'demo-device-volunteer' },
   });
 
   // ─── Tasks ───────────────────────────────────────────────────────────────────
@@ -100,7 +109,11 @@ async function main() {
       startTime:      d(0, 7, 0),
       endTime:        d(0, 13, 0),
       isActive:       true,
+      organizationId: DEFAULT_ORG_ID,
     }});
+  } else if (!task1.organizationId) {
+    await prisma.task.update({ where: { id: task1.id }, data: { organizationId: DEFAULT_ORG_ID } });
+    task1 = await prisma.task.findUniqueOrThrow({ where: { id: task1.id } });
   }
 
   let task2 = await prisma.task.findFirst({ where: { title: 'Beach Cleanup Drive — Juhu Beach' } });
@@ -116,7 +129,11 @@ async function main() {
       startTime:      d(1, 6, 30),
       endTime:        d(1, 10, 30),
       isActive:       true,
+      organizationId: DEFAULT_ORG_ID,
     }});
+  } else if (!task2.organizationId) {
+    await prisma.task.update({ where: { id: task2.id }, data: { organizationId: DEFAULT_ORG_ID } });
+    task2 = await prisma.task.findUniqueOrThrow({ where: { id: task2.id } });
   }
 
   // ─── Task Assignments ─────────────────────────────────────────────────────────
@@ -195,6 +212,7 @@ async function main() {
       {
         taskId:        task1.id,
         userId:        priya.id,
+        organizationId: DEFAULT_ORG_ID,
         quantityItems: 22,
         notes:         'Planted 22 native saplings including Neem, Peepal, and Karanj varieties across Plot 3C. Soil was dry — added water from the tank. All saplings labelled and logged.',
         status:        'APPROVED',
@@ -205,6 +223,7 @@ async function main() {
       {
         taskId:        task1.id,
         userId:        priya.id,
+        organizationId: DEFAULT_ORG_ID,
         quantityItems: 18,
         notes:         'Completed second plantation round at Plot 3D. Some saplings from yesterday\'s batch needed re-staking due to wind. Flagged 3 damaged saplings for replacement.',
         status:        'SUBMITTED',
@@ -219,6 +238,7 @@ async function main() {
       {
         taskId:        task1.id,
         userId:        arjun.id,
+        organizationId: DEFAULT_ORG_ID,
         quantityItems: 19,
         notes:         'Cleared 19 large waste bags from the north end of the site. Found significant polythene accumulation near the drain — reported to zone supervisor. Waste segregation done at collection point.',
         status:        'APPROVED',
@@ -229,12 +249,149 @@ async function main() {
       {
         taskId:        task1.id,
         userId:        arjun.id,
+        organizationId: DEFAULT_ORG_ID,
         quantityItems: 25,
         notes:         'Good turnout at today\'s cleanup. Collected 25 bags total — 16 recyclable, 9 non-recyclable. Team spirits high. Suggest increasing frequency at this zone.',
         status:        'SUBMITTED',
         timestamp:     d(-1, 12, 55),
       },
     ]});
+  }
+
+  const task2ApprovedCount = await prisma.fieldReport.count({
+    where: { taskId: task2.id, status: 'APPROVED' },
+  });
+  if (task2ApprovedCount === 0) {
+    await prisma.fieldReport.create({
+      data: {
+        taskId: task2.id,
+        userId: priya.id,
+        organizationId: DEFAULT_ORG_ID,
+        quantityItems: 42,
+        notes: 'Juhu north stretch cleanup — 42 bags sorted; high tide line cleared of micro-plastics.',
+        status: 'APPROVED',
+        approvedById: admin.id,
+        approvedAt: d(-10, 17, 0),
+        timestamp: d(-10, 14, 30),
+      },
+    });
+  }
+
+  // ─── Donor portal (campaigns, donations) ────────────────────────────────────
+  console.log('💝 Donor campaigns & donations…');
+  const donorPwd = await bcrypt.hash('Donor@1234', 10);
+  const donorUser = await prisma.user.upsert({
+    where: { email: 'donor@fieldops.demo' },
+    update: { organizationId: DEFAULT_ORG_ID },
+    create: {
+      email: 'donor@fieldops.demo',
+      passwordHash: donorPwd,
+      role: 'DONOR',
+      organizationId: DEFAULT_ORG_ID,
+      firstName: 'Maya',
+      lastName: 'Patil',
+      deviceId: 'device-donor-001',
+      isActive: true,
+    },
+  });
+
+  let dc1 = await prisma.donorCampaign.findFirst({ where: { taskId: task1.id } });
+  if (!dc1) {
+    dc1 = await prisma.donorCampaign.create({
+      data: {
+        title: 'Aarey Green Belt — Donor-funded',
+        description: 'Native sapling programme aligned with the Aarey field task; donors receive verified plantation reports.',
+        zoneName: task1.zoneName,
+        lat: task1.geofenceLat,
+        lng: task1.geofenceLng,
+        startDate: task1.startTime,
+        endDate: task1.endTime,
+        status: 'ACTIVE',
+        taskId: task1.id,
+        organizationId: DEFAULT_ORG_ID,
+      },
+    });
+  } else {
+    await prisma.donorCampaign.update({
+      where: { id: dc1.id },
+      data: {
+        description: 'Native sapling programme aligned with the Aarey field task; donors receive verified plantation reports.',
+        startDate: task1.startTime,
+        endDate: task1.endTime,
+        organizationId: DEFAULT_ORG_ID,
+      },
+    });
+  }
+  let dc2 = await prisma.donorCampaign.findFirst({ where: { taskId: task2.id } });
+  if (!dc2) {
+    dc2 = await prisma.donorCampaign.create({
+      data: {
+        title: 'Juhu Shoreline Restoration',
+        description: 'Coastal cleanup and plastic diversion; impact tracked through approved field reports.',
+        zoneName: task2.zoneName,
+        lat: task2.geofenceLat,
+        lng: task2.geofenceLng,
+        startDate: task2.startTime,
+        endDate: task2.endTime,
+        status: 'COMPLETED',
+        taskId: task2.id,
+        organizationId: DEFAULT_ORG_ID,
+      },
+    });
+  } else {
+    await prisma.donorCampaign.update({
+      where: { id: dc2.id },
+      data: {
+        description: 'Coastal cleanup and plastic diversion; impact tracked through approved field reports.',
+        startDate: task2.startTime,
+        endDate: task2.endTime,
+        organizationId: DEFAULT_ORG_ID,
+      },
+    });
+  }
+
+  const donationCount = await prisma.donation.count({ where: { donorId: donorUser.id } });
+  if (donationCount === 0) {
+    await prisma.donation.createMany({
+      data: [
+        { donorId: donorUser.id, campaignId: dc1.id, amount: 25000, currency: 'INR' },
+        { donorId: donorUser.id, campaignId: dc1.id, amount: 15000, currency: 'INR', createdAt: d(-45) },
+        { donorId: donorUser.id, campaignId: dc2.id, amount: 40000, currency: 'INR' },
+      ],
+    });
+  }
+
+  await prisma.fieldReport.updateMany({
+    where: { taskId: { in: [task1.id, task2.id] }, status: 'APPROVED', beforePhotoUrl: null },
+    data: {
+      beforePhotoUrl: 'https://images.unsplash.com/photo-1618477388954-7852f326dddb?w=800&q=80',
+      afterPhotoUrl: 'https://images.unsplash.com/photo-1497436072909-60f360a1ab4e?w=800&q=80',
+    },
+  });
+
+  // Donor portal: only CampaignReport-linked APPROVED reports are visible — seed explicit links.
+  console.log('🔗 Linking approved reports to donor campaigns (CampaignReport)…');
+  dc1 = await prisma.donorCampaign.findFirstOrThrow({ where: { id: dc1.id } });
+  dc2 = await prisma.donorCampaign.findFirstOrThrow({ where: { id: dc2.id } });
+  for (const { id } of await prisma.fieldReport.findMany({
+    where: { taskId: task1.id, status: 'APPROVED' },
+    select: { id: true },
+  })) {
+    await prisma.campaignReport.upsert({
+      where: { campaignId_reportId: { campaignId: dc1.id, reportId: id } },
+      create: { campaignId: dc1.id, reportId: id },
+      update: {},
+    });
+  }
+  for (const { id } of await prisma.fieldReport.findMany({
+    where: { taskId: task2.id, status: 'APPROVED' },
+    select: { id: true },
+  })) {
+    await prisma.campaignReport.upsert({
+      where: { campaignId_reportId: { campaignId: dc2.id, reportId: id } },
+      create: { campaignId: dc2.id, reportId: id },
+      update: {},
+    });
   }
 
   // ─── Leaves ───────────────────────────────────────────────────────────────────
@@ -313,6 +470,8 @@ async function main() {
   console.log('\n📦 Legacy demo accounts still work:');
   console.log('   demo.user1@ngo.local         /  Demo1234!');
   console.log('   volunteer@fieldops.demo      /  password123');
+  console.log('\n💚 Donor portal:');
+  console.log('   donor@fieldops.demo          /  Donor@1234');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
   await prisma.$disconnect();

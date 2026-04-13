@@ -1,41 +1,24 @@
 import { AuthService } from './auth.service';
-import { LoginDto, RegisterDto } from './dto/auth.dto';
-import type { Response } from 'express';
+import { RegisterDto } from './dto/auth.dto';
+import type { Response, Request as ExpressRequest } from 'express';
+import { LoginDto } from './dto/auth.dto';
 export declare class AuthController {
     private authService;
     constructor(authService: AuthService);
-    private setAuthCookie;
     login(body: LoginDto, res: Response): Promise<{
-        access_token: string;
-        user: {
-            id: any;
-            email: any;
-            role: any;
-            firstName: any;
-            lastName: any;
-        };
+        user: import("../users/users.service").PublicUser;
+    }>;
+    refresh(req: ExpressRequest, res: Response): Promise<{
+        success: boolean;
     }>;
     register(body: RegisterDto, res: Response): Promise<{
-        access_token: string;
+        user: import("../users/users.service").PublicUser;
+    }>;
+    getMe(req: {
         user: {
-            id: any;
-            email: any;
-            role: any;
-            firstName: any;
-            lastName: any;
+            id: string;
         };
-    }>;
-    getMe(req: any): Promise<{
-        isActive: boolean;
-        id: string;
-        deviceId: string | null;
-        createdAt: Date;
-        email: string;
-        role: import("@prisma/client").$Enums.Role;
-        firstName: string;
-        lastName: string;
-        authInvalidatedAt: Date | null;
-    }>;
+    }): Promise<import("../users/users.service").PublicUser>;
     logout(req: {
         user: {
             id: string;

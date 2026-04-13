@@ -28,9 +28,12 @@ let RolesGuard = class RolesGuard {
         }
         const { user } = context.switchToHttp().getRequest();
         if (!user) {
-            return false;
+            throw new common_1.ForbiddenException('Authentication required');
         }
-        return requiredRoles.some((role) => user.role === role);
+        if (!requiredRoles.includes(user.role)) {
+            throw new common_1.ForbiddenException('Insufficient permissions for this resource');
+        }
+        return true;
     }
 };
 exports.RolesGuard = RolesGuard;

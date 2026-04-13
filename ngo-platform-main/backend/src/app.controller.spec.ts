@@ -2,6 +2,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaService } from './prisma/prisma.service';
+import { AdminDashboardService } from './admin/admin-dashboard.service';
+import { AdminMapDataService } from './admin/admin-map-data.service';
 
 describe('AppController', () => {
   let appController: AppController;
@@ -36,6 +38,8 @@ describe('AppController', () => {
       providers: [
         AppService,
         { provide: PrismaService, useValue: prismaMock },
+        { provide: AdminDashboardService, useValue: { getDashboardKpis: jest.fn() } },
+        { provide: AdminMapDataService, useValue: { getMapData: jest.fn() } },
       ],
     }).compile();
 

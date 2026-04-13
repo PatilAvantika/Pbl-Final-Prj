@@ -13,14 +13,16 @@ const reports_controller_1 = require("./reports.controller");
 const prisma_module_1 = require("../prisma/prisma.module");
 const tasks_module_1 = require("../tasks/tasks.module");
 const audit_module_1 = require("../audit/audit.module");
+const donor_module_1 = require("../donor/donor.module");
 let ReportsModule = class ReportsModule {
 };
 exports.ReportsModule = ReportsModule;
 exports.ReportsModule = ReportsModule = __decorate([
     (0, common_1.Module)({
-        imports: [prisma_module_1.PrismaModule, tasks_module_1.TasksModule, audit_module_1.AuditModule],
+        imports: [prisma_module_1.PrismaModule, tasks_module_1.TasksModule, audit_module_1.AuditModule, donor_module_1.DonorModule],
         controllers: [reports_controller_1.ReportsController],
         providers: [reports_service_1.ReportsService],
+        exports: [reports_service_1.ReportsService],
     })
 ], ReportsModule);
 //# sourceMappingURL=reports.module.js.map

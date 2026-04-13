@@ -41,19 +41,26 @@ var __importStar = (this && this.__importStar) || (function () {
 var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
+var AuthService_1;
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AuthService = void 0;
 const common_1 = require("@nestjs/common");
 const jwt_1 = require("@nestjs/jwt");
+const crypto_1 = require("crypto");
 const users_service_1 = require("../users/users.service");
 const bcrypt = __importStar(require("bcrypt"));
 const client_1 = require("@prisma/client");
-let AuthService = class AuthService {
+const prisma_service_1 = require("../prisma/prisma.service");
+const auth_constants_1 = require("./auth.constants");
+let AuthService = AuthService_1 = class AuthService {
     usersService;
     jwtService;
-    constructor(usersService, jwtService) {
+    prisma;
+    logger = new common_1.Logger(AuthService_1.name);
+    constructor(usersService, jwtService, prisma) {
         this.usersService = usersService;
         this.jwtService = jwtService;
+        this.prisma = prisma;
     }
     async validateUser(email, pass) {
         const user = await this.usersService.findByEmail(email);
@@ -65,29 +72,56 @@ let AuthService = class AuthService {
         }
         const isMatch = await bcrypt.compare(pass, user.passwordHash);
         if (isMatch) {
-            const { passwordHash, ...result } = user;
-            return result;
+            return (0, users_service_1.toPublicUser)(user);
         }
         throw new common_1.UnauthorizedException('Invalid credentials');
     }
-    async login(user) {
+    hashRefresh(raw) {
+        return (0, crypto_1.createHash)('sha256').update(raw, 'utf8').digest('hex');
+    }
+    async persistRefreshToken(userId) {
+        const ttlSec = (0, auth_constants_1.getRefreshTokenTtlSec)();
+        const raw = (0, crypto_1.randomBytes)(48).toString('base64url');
+        const tokenHash = this.hashRefresh(raw);
+        const expiresAt = new Date(Date.now() + ttlSec * 1000);
+        await this.prisma.refreshToken.create({
+            data: { userId, tokenHash, expiresAt },
+        });
+        return { raw, ttlSec };
+    }
+    async issueSession(user) {
         const payload = { email: user.email, sub: user.id, role: user.role };
+        const accessToken = this.jwtService.sign(payload);
+        const { raw, ttlSec } = await this.persistRefreshToken(user.id);
         return {
-            access_token: this.jwtService.sign(payload),
-            user: {
-                id: user.id,
-                email: user.email,
-                role: user.role,
-                firstName: user.firstName,
-                lastName: user.lastName,
-            }
+            accessToken,
+            refreshTokenRaw: raw,
+            refreshTtlSec: ttlSec,
+            user,
         };
+    }
+    async rotateRefreshSession(refreshRaw) {
+        const tokenHash = this.hashRefresh(refreshRaw);
+        const row = await this.prisma.refreshToken.findUnique({ where: { tokenHash } });
+        if (!row || row.expiresAt < new Date()) {
+            if (row) {
+                await this.prisma.refreshToken.delete({ where: { id: row.id } }).catch(() => undefined);
+            }
+            throw new common_1.UnauthorizedException('Invalid or expired refresh session');
+        }
+        await this.prisma.refreshToken.delete({ where: { id: row.id } });
+        const user = await this.usersService.findSafeUserByIdOrNull(row.userId);
+        if (!user || !user.isActive) {
+            throw new common_1.UnauthorizedException();
+        }
+        return this.issueSession(user);
     }
     async registerUser(dto) {
         const disallowedRoles = [client_1.Role.SUPER_ADMIN, client_1.Role.NGO_ADMIN, client_1.Role.HR_MANAGER, client_1.Role.FINANCE_MANAGER];
         if (disallowedRoles.includes(dto.role)) {
             throw new common_1.ForbiddenException('Role cannot be self-registered');
         }
+        this.logger.log(`registerUser email=${dto.email} role=${String(dto.role)} name=${dto.firstName} ${dto.lastName}`);
         const user = await this.usersService.create({
             email: dto.email,
             passwordHash: dto.password,
@@ -96,7 +130,7 @@ let AuthService = class AuthService {
             lastName: dto.lastName,
             isActive: true,
         });
-        return this.login(user);
+        return this.issueSession(user);
     }
     async getMe(userId) {
         const user = await this.usersService.findSafeUserByIdOrNull(userId);
@@ -107,12 +141,14 @@ let AuthService = class AuthService {
     }
     async invalidateAuthTokens(userId) {
         await this.usersService.markAuthInvalidatedNow(userId);
+        await this.prisma.refreshToken.deleteMany({ where: { userId } });
     }
 };
 exports.AuthService = AuthService;
-exports.AuthService = AuthService = __decorate([
+exports.AuthService = AuthService = AuthService_1 = __decorate([
     (0, common_1.Injectable)(),
     __metadata("design:paramtypes", [users_service_1.UsersService,
-        jwt_1.JwtService])
+        jwt_1.JwtService,
+        prisma_service_1.PrismaService])
 ], AuthService);
 //# sourceMappingURL=auth.service.js.map

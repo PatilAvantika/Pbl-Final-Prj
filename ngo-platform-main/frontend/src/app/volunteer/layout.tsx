@@ -1,9 +1,12 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { useEffect } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
 import { LayoutDashboard, CheckSquare, Clock, FileText, UserCircle } from 'lucide-react';
 import ProtectedRoute from '../../components/ProtectedRoute';
+import { useAuth } from '../../context/AuthContext';
+import { needsVolunteerOnboarding } from '../../lib/onboarding';
 
 const NAV_ITEMS = [
     { href: '/volunteer/dashboard', label: 'Home', icon: LayoutDashboard },
@@ -15,7 +18,16 @@ const NAV_ITEMS = [
 
 export default function VolunteerLayout({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
+    const router = useRouter();
+    const { user, isLoading } = useAuth();
     const hideNav = pathname.endsWith('/camera');
+
+    useEffect(() => {
+        if (isLoading || !user) return;
+        if (needsVolunteerOnboarding(user)) {
+            router.replace('/onboarding');
+        }
+    }, [user, isLoading, router]);
 
     const isActive = (href: string) => {
         if (href === '/volunteer/dashboard') return pathname === href;

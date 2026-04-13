@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import api from '../../../lib/axios';
+import api from '../../../lib/api/client';
 import { Shield, Mail, CheckCircle, Edit, XCircle, Plus, Search } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../../context/AuthContext';

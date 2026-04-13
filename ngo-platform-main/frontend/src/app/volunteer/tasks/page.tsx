@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import api from '../../../lib/axios';
+import api from '../../../lib/api/client';
+import { getApiErrorMessage } from '@/lib/api-errors';
 import {
     MapPin, Clock, Loader2, AlertCircle, ChevronRight,
     Target, CheckCircle, Circle, Timer,
@@ -18,10 +19,27 @@ type Task = {
     geofenceRadius: number;
     geofenceLat: number;
     geofenceLng: number;
+    /** Prisma TaskLifecycleStatus from API */
+    lifecycleStatus?: string;
     status?: string;
     priority?: string;
     description?: string;
 };
+
+/** Map API lifecycle to UI chip keys (STATUS_CHIP). */
+function chipStatus(task: Task): string {
+    const ls = task.lifecycleStatus ?? task.status;
+    if (ls === 'ACTIVE') return 'IN_PROGRESS';
+    if (ls === 'COMPLETED') return 'COMPLETED';
+    if (ls === 'CANCELLED') return 'COMPLETED';
+    if (ls === 'PENDING') return 'PENDING';
+    return 'NOT_STARTED';
+}
+
+function isCompletedLifecycle(task: Task): boolean {
+    const ls = task.lifecycleStatus ?? task.status;
+    return ls === 'COMPLETED' || ls === 'CANCELLED';
+}
 
 const FILTERS = ['All', 'Active', 'Completed'] as const;
 type FilterType = (typeof FILTERS)[number];
@@ -55,15 +73,26 @@ const STATUS_ICON: Record<string, React.ReactNode> = {
 export default function TasksPage() {
     const [tasks, setTasks] = useState<Task[]>([]);
     const [loading, setLoading] = useState(true);
+    const [listError, setListError] = useState<string | null>(null);
     const [filter, setFilter] = useState<FilterType>('All');
 
     const fetchTasks = useCallback(async () => {
         try {
             setLoading(true);
-            const res = await api.get('/tasks/my-tasks');
-            setTasks(res.data);
+            setListError(null);
+            const res = await api.get<Task[]>('/tasks/my-tasks');
+            const rows = Array.isArray(res.data) ? res.data : [];
+            if (process.env.NODE_ENV === 'development') {
+                console.log('Tasks:', rows);
+            }
+            if (!Array.isArray(res.data)) {
+                console.error('[volunteer/tasks] GET /tasks/my-tasks expected array', res.data);
+            }
+            setTasks(rows);
         } catch (err) {
-            console.error(err);
+            console.error('[volunteer/tasks] GET /tasks/my-tasks failed', err);
+            setTasks([]);
+            setListError(getApiErrorMessage(err, 'Could not load tasks.'));
         } finally {
             setLoading(false);
         }
@@ -74,20 +103,20 @@ export default function TasksPage() {
     }, [fetchTasks]);
 
     const filteredTasks = tasks.filter((t) => {
-        if (filter === 'Active') return t.status !== 'COMPLETED';
-        if (filter === 'Completed') return t.status === 'COMPLETED';
+        if (filter === 'Active') return !isCompletedLifecycle(t);
+        if (filter === 'Completed') return isCompletedLifecycle(t);
         return true;
     });
 
     const isOverdue = (task: Task) => {
-        if (task.status === 'COMPLETED') return false;
+        if (isCompletedLifecycle(task)) return false;
         if (!task.endTime) return false;
         return new Date(task.endTime) < new Date();
     };
 
     const countByFilter = (f: FilterType) => {
-        if (f === 'Active') return tasks.filter((t) => t.status !== 'COMPLETED').length;
-        if (f === 'Completed') return tasks.filter((t) => t.status === 'COMPLETED').length;
+        if (f === 'Active') return tasks.filter((t) => !isCompletedLifecycle(t)).length;
+        if (f === 'Completed') return tasks.filter((t) => isCompletedLifecycle(t)).length;
         return tasks.length;
     };
 
@@ -131,6 +160,20 @@ export default function TasksPage() {
                     ))}
                 </div>
 
+                {listError ? (
+                    <div className="bg-red-50 text-red-800 p-4 rounded-2xl text-sm font-medium border border-red-100">
+                        <p className="font-bold">Could not load tasks</p>
+                        <p className="mt-1 text-red-700">{listError}</p>
+                        <button
+                            type="button"
+                            onClick={() => void fetchTasks()}
+                            className="mt-3 text-sm font-bold text-red-900 underline"
+                        >
+                            Retry
+                        </button>
+                    </div>
+                ) : null}
+
                 {loading ? (
                     <div className="py-24 flex flex-col items-center text-slate-400">
                         <Loader2 className="w-8 h-8 animate-spin mb-3 text-emerald-500" />
@@ -142,19 +185,23 @@ export default function TasksPage() {
                             <Target className="w-8 h-8 text-emerald-300" />
                         </div>
                         <p className="font-bold text-slate-700 mb-1.5">
-                            {filter === 'Completed' ? 'No completed tasks yet' : 'No tasks right now'}
+                            {filter === 'Completed'
+                                ? 'No completed tasks yet'
+                                : filter === 'Active'
+                                  ? 'No active tasks'
+                                  : 'No tasks assigned'}
                         </p>
                         <p className="text-sm text-slate-400">
                             {filter === 'Completed'
                                 ? 'Complete your first task to see it here'
-                                : 'Your team lead will assign tasks soon'}
+                                : 'Your coordinator can assign you from the admin console.'}
                         </p>
                     </div>
                 ) : (
                     <div className="space-y-3">
                         {filteredTasks.map((task) => {
                             const overdue = isOverdue(task);
-                            const status = task.status || 'NOT_STARTED';
+                            const status = chipStatus(task);
                             const priority = task.priority || 'LOW';
 
                             return (

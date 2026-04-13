@@ -1,6 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { Leave, LeaveStatus, LeaveType, Payslip, Prisma } from '@prisma/client';
+import { Leave, LeaveStatus, LeaveType, Payslip, Prisma, Role } from '@prisma/client';
 import { Cron, CronExpression } from '@nestjs/schedule';
 
 interface LeaveListQuery {
@@ -8,6 +8,11 @@ interface LeaveListQuery {
     limit?: number;
     status?: LeaveStatus;
     userId?: string;
+}
+
+export interface LeaveListScope {
+    organizationId?: string | null;
+    role: Role;
 }
 
 interface PayslipListQuery {
@@ -34,13 +39,28 @@ export class HrService {
         });
     }
 
-    async updateLeaveStatus(leaveId: string, status: LeaveStatus): Promise<Leave> {
-        const leave = await this.prisma.leave.findUnique({ where: { id: leaveId } });
+    async updateLeaveStatus(
+        leaveId: string,
+        status: LeaveStatus,
+        scope?: LeaveListScope,
+    ): Promise<Leave> {
+        const leave = await this.prisma.leave.findUnique({
+            where: { id: leaveId },
+            include: { user: { select: { organizationId: true } } },
+        });
         if (!leave) throw new NotFoundException('Leave request not found');
+        if (
+            scope &&
+            scope.role !== Role.SUPER_ADMIN &&
+            scope.organizationId &&
+            leave.user.organizationId !== scope.organizationId
+        ) {
+            throw new ForbiddenException('Leave request is not in your organization');
+        }
 
         return this.prisma.leave.update({
             where: { id: leaveId },
-            data: { status }
+            data: { status },
         });
     }
 
@@ -61,15 +81,21 @@ export class HrService {
         });
     }
 
-    async getAllLeaves(query: LeaveListQuery = {}): Promise<Leave[]> {
+    async getAllLeaves(query: LeaveListQuery = {}, scope?: LeaveListScope): Promise<Leave[]> {
         const page = query.page ?? 1;
         const limit = query.limit ?? 20;
         const skip = (page - 1) * limit;
+
+        const where: Prisma.LeaveWhereInput = {};
+        if (query.status) where.status = query.status;
+        if (query.userId) where.userId = query.userId;
+
+        if (scope && scope.role !== Role.SUPER_ADMIN && scope.organizationId) {
+            where.user = { organizationId: scope.organizationId };
+        }
+
         return this.prisma.leave.findMany({
-            where: {
-                status: query.status,
-                userId: query.userId,
-            },
+            where,
             include: { user: { select: { firstName: true, lastName: true, email: true, role: true } } },
             orderBy: { startDate: 'desc' },
             skip,

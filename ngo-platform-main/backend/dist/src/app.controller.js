@@ -20,12 +20,24 @@ const passport_1 = require("@nestjs/passport");
 const roles_guard_1 = require("./auth/roles.guard");
 const roles_decorator_1 = require("./auth/roles.decorator");
 const client_1 = require("@prisma/client");
+const admin_dashboard_service_1 = require("./admin/admin-dashboard.service");
+const admin_map_data_service_1 = require("./admin/admin-map-data.service");
+function requireOrganizationId(req) {
+    const id = req.user?.organizationId;
+    if (!id)
+        throw new common_1.ForbiddenException('User is not associated with an organization');
+    return id;
+}
 let AppController = class AppController {
     appService;
     prisma;
-    constructor(appService, prisma) {
+    adminDashboard;
+    adminMapData;
+    constructor(appService, prisma, adminDashboard, adminMapData) {
         this.appService = appService;
         this.prisma = prisma;
+        this.adminDashboard = adminDashboard;
+        this.adminMapData = adminMapData;
     }
     getHello() {
         return this.appService.getHello();
@@ -36,6 +48,14 @@ let AppController = class AppController {
     async getReady() {
         await this.prisma.$queryRaw `SELECT 1`;
         return { status: 'ready', timestamp: new Date().toISOString() };
+    }
+    async getAdminDashboard(req) {
+        const organizationId = requireOrganizationId(req);
+        return this.adminDashboard.getDashboardKpis(organizationId);
+    }
+    async getAdminMapData(req) {
+        const organizationId = requireOrganizationId(req);
+        return this.adminMapData.getMapData(organizationId);
     }
     async getAdminMetrics(from, to) {
         const start = from ? new Date(from) : new Date(new Date().setDate(new Date().getDate() - 30));
@@ -109,6 +129,24 @@ __decorate([
 __decorate([
     (0, common_1.UseGuards)((0, passport_1.AuthGuard)('jwt'), roles_guard_1.RolesGuard),
     (0, roles_decorator_1.Roles)(client_1.Role.SUPER_ADMIN, client_1.Role.NGO_ADMIN, client_1.Role.FIELD_COORDINATOR, client_1.Role.HR_MANAGER, client_1.Role.FINANCE_MANAGER),
+    (0, common_1.Get)('admin/dashboard'),
+    __param(0, (0, common_1.Request)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
+], AppController.prototype, "getAdminDashboard", null);
+__decorate([
+    (0, common_1.UseGuards)((0, passport_1.AuthGuard)('jwt'), roles_guard_1.RolesGuard),
+    (0, roles_decorator_1.Roles)(client_1.Role.SUPER_ADMIN, client_1.Role.NGO_ADMIN, client_1.Role.FIELD_COORDINATOR, client_1.Role.HR_MANAGER, client_1.Role.FINANCE_MANAGER),
+    (0, common_1.Get)('admin/map-data'),
+    __param(0, (0, common_1.Request)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
+], AppController.prototype, "getAdminMapData", null);
+__decorate([
+    (0, common_1.UseGuards)((0, passport_1.AuthGuard)('jwt'), roles_guard_1.RolesGuard),
+    (0, roles_decorator_1.Roles)(client_1.Role.SUPER_ADMIN, client_1.Role.NGO_ADMIN, client_1.Role.FIELD_COORDINATOR, client_1.Role.HR_MANAGER, client_1.Role.FINANCE_MANAGER),
     (0, common_1.Get)('admin/metrics'),
     __param(0, (0, common_1.Query)('from')),
     __param(1, (0, common_1.Query)('to')),
@@ -119,6 +157,8 @@ __decorate([
 exports.AppController = AppController = __decorate([
     (0, common_1.Controller)(),
     __metadata("design:paramtypes", [app_service_1.AppService,
-        prisma_service_1.PrismaService])
+        prisma_service_1.PrismaService,
+        admin_dashboard_service_1.AdminDashboardService,
+        admin_map_data_service_1.AdminMapDataService])
 ], AppController);
 //# sourceMappingURL=app.controller.js.map

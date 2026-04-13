@@ -49,10 +49,14 @@ let PrismaService = class PrismaService extends client_1.PrismaClient {
         if (connectionString?.startsWith('postgresql://') || connectionString?.startsWith('postgres://')) {
             connectionString = normalizePostgresUrl(connectionString);
         }
+        const connectionTimeoutMillis = Number(process.env.DATABASE_CONNECTION_TIMEOUT_MS) || 90_000;
+        const poolMax = Number(process.env.DATABASE_POOL_MAX) || 10;
         const pool = new pg_1.Pool({
             connectionString,
-            connectionTimeoutMillis: 20_000,
-            max: 10,
+            connectionTimeoutMillis,
+            max: poolMax,
+            keepAlive: true,
+            keepAliveInitialDelayMillis: 10_000,
         });
         const adapter = new adapter_pg_1.PrismaPg(pool);
         super({ adapter });

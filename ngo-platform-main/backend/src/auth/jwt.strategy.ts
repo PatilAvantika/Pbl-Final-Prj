@@ -4,17 +4,20 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtPayload } from './auth.service';
 import { UsersService } from '../users/users.service';
 import { getJwtSecret } from './auth.constants';
+import { ACCESS_TOKEN_COOKIE, LEGACY_TOKEN_COOKIE } from './auth.constants';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
     constructor(private readonly usersService: UsersService) {
-        const cookieExtractor = (req: any): string | null => {
+        const cookieExtractor = (req: { headers?: { cookie?: string } }): string | null => {
             if (!req?.headers?.cookie) return null;
-            const tokenCookie = req.headers.cookie
-                .split(';')
-                .map((v: string) => v.trim())
-                .find((v: string) => v.startsWith('token='));
-            return tokenCookie ? decodeURIComponent(tokenCookie.split('=')[1]) : null;
+            const parts = req.headers.cookie.split(';').map((v: string) => v.trim());
+            const access = parts.find((v: string) => v.startsWith(`${ACCESS_TOKEN_COOKIE}=`));
+            if (access) {
+                return decodeURIComponent(access.split('=').slice(1).join('='));
+            }
+            const legacy = parts.find((v: string) => v.startsWith(`${LEGACY_TOKEN_COOKIE}=`));
+            return legacy ? decodeURIComponent(legacy.split('=').slice(1).join('=')) : null;
         };
         super({
             jwtFromRequest: ExtractJwt.fromExtractors([
@@ -38,6 +41,11 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         ) {
             throw new UnauthorizedException();
         }
-        return { id: principal.id, email: principal.email, role: principal.role };
+        return {
+            id: principal.id,
+            email: principal.email,
+            role: principal.role,
+            organizationId: principal.organizationId,
+        };
     }
 }

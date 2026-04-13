@@ -11,6 +11,17 @@ import { AttendanceModule } from './attendance/attendance.module';
 import { ReportsModule } from './reports/reports.module';
 import { HrModule } from './hr/hr.module';
 import { AuditModule } from './audit/audit.module';
+import { OnboardingModule } from './onboarding/onboarding.module';
+import { TeamModule } from './team/team.module';
+import { StaffModule } from './staff/staff.module';
+import { DonorModule } from './donor/donor.module';
+import { ResourcesModule } from './resources/resources.module';
+import { RedisModule } from './redis/redis.module';
+import { QueueModule } from './queue/queue.module';
+import { VolunteerModule } from './volunteer/volunteer.module';
+import { TeamLeaderModule } from './team-leader/team-leader.module';
+import { AdminDashboardService } from './admin/admin-dashboard.service';
+import { AdminMapDataService } from './admin/admin-map-data.service';
 
 @Module({
   imports: [
@@ -21,6 +32,8 @@ import { AuditModule } from './audit/audit.module';
       },
     ]),
     ScheduleModule.forRoot(),
+    RedisModule,
+    QueueModule,
     PrismaModule,
     UsersModule,
     AuthModule,
@@ -29,8 +42,14 @@ import { AuditModule } from './audit/audit.module';
     ReportsModule,
     HrModule,
     AuditModule,
+    OnboardingModule,
+    TeamModule,
+    StaffModule,
+    DonorModule,
+    ResourcesModule,
+    TeamLeaderModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [AppService, AdminDashboardService, AdminMapDataService],
 })
 export class AppModule { }

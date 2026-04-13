@@ -27,60 +27,9 @@ export declare class UsersController {
     private readonly usersService;
     private readonly auditService;
     constructor(usersService: UsersService, auditService: AuditService);
-    create(data: CreateUserDto, req: any): Promise<{
-        isActive: boolean;
-        id: string;
-        deviceId: string | null;
-        createdAt: Date;
-        email: string;
-        passwordHash: string;
-        role: import("@prisma/client").$Enums.Role;
-        firstName: string;
-        lastName: string;
-        authInvalidatedAt: Date | null;
-    }>;
-    findAll(query: UsersQueryDto): Promise<{
-        isActive: boolean;
-        id: string;
-        deviceId: string | null;
-        createdAt: Date;
-        email: string;
-        role: import("@prisma/client").$Enums.Role;
-        firstName: string;
-        lastName: string;
-        authInvalidatedAt: Date | null;
-    }[]>;
-    findOne(id: string): Promise<{
-        isActive: boolean;
-        id: string;
-        deviceId: string | null;
-        createdAt: Date;
-        email: string;
-        role: import("@prisma/client").$Enums.Role;
-        firstName: string;
-        lastName: string;
-        authInvalidatedAt: Date | null;
-    }>;
-    update(id: string, data: UpdateUserDto, req: any): Promise<{
-        isActive: boolean;
-        id: string;
-        deviceId: string | null;
-        createdAt: Date;
-        email: string;
-        role: import("@prisma/client").$Enums.Role;
-        firstName: string;
-        lastName: string;
-        authInvalidatedAt: Date | null;
-    }>;
-    remove(id: string, req: any): Promise<{
-        isActive: boolean;
-        id: string;
-        deviceId: string | null;
-        createdAt: Date;
-        email: string;
-        role: import("@prisma/client").$Enums.Role;
-        firstName: string;
-        lastName: string;
-        authInvalidatedAt: Date | null;
-    }>;
+    create(data: CreateUserDto, req: any): Promise<import("./users.service").PublicUser>;
+    findAll(query: UsersQueryDto): Promise<import("./users.service").PublicUser[]>;
+    findOne(id: string): Promise<import("./users.service").PublicUser>;
+    update(id: string, data: UpdateUserDto, req: any): Promise<import("./users.service").PublicUser>;
+    remove(id: string, req: any): Promise<import("./users.service").PublicUser>;
 }

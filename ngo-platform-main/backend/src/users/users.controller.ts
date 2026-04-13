@@ -87,7 +87,6 @@ export class UsersQueryDto {
 }
 
 @UseGuards(AuthGuard('jwt'), RolesGuard)
-@Roles(Role.SUPER_ADMIN, Role.NGO_ADMIN, Role.HR_MANAGER)
 @Controller('users')
 export class UsersController {
     constructor(
@@ -95,6 +94,7 @@ export class UsersController {
         private readonly auditService: AuditService,
     ) { }
 
+    @Roles(Role.SUPER_ADMIN, Role.NGO_ADMIN, Role.HR_MANAGER)
     @Post()
     async create(@Body() data: CreateUserDto, @Request() req: any) {
         const user = await this.usersService.create({
@@ -115,16 +115,25 @@ export class UsersController {
         return user;
     }
 
+    @Roles(
+        Role.SUPER_ADMIN,
+        Role.NGO_ADMIN,
+        Role.HR_MANAGER,
+        Role.FIELD_COORDINATOR,
+        Role.TEAM_LEADER,
+    )
     @Get()
     findAll(@Query() query: UsersQueryDto) {
         return this.usersService.findAll(query);
     }
 
+    @Roles(Role.SUPER_ADMIN, Role.NGO_ADMIN, Role.HR_MANAGER)
     @Get(':id')
     findOne(@Param('id') id: string) {
         return this.usersService.findOne(id);
     }
 
+    @Roles(Role.SUPER_ADMIN, Role.NGO_ADMIN, Role.HR_MANAGER)
     @Put(':id')
     async update(@Param('id') id: string, @Body() data: UpdateUserDto, @Request() req: any) {
         const { password, ...rest } = data;
@@ -143,6 +152,7 @@ export class UsersController {
         return user;
     }
 
+    @Roles(Role.SUPER_ADMIN, Role.NGO_ADMIN, Role.HR_MANAGER)
     @Delete(':id')
     async remove(@Param('id') id: string, @Request() req: any) {
         const user = await this.usersService.remove(id);

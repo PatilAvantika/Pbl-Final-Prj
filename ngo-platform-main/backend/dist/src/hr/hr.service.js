@@ -13,6 +13,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.HrService = void 0;
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../prisma/prisma.service");
+const client_1 = require("@prisma/client");
 const schedule_1 = require("@nestjs/schedule");
 let HrService = HrService_1 = class HrService {
     prisma;
@@ -28,13 +29,22 @@ let HrService = HrService_1 = class HrService {
             }
         });
     }
-    async updateLeaveStatus(leaveId, status) {
-        const leave = await this.prisma.leave.findUnique({ where: { id: leaveId } });
+    async updateLeaveStatus(leaveId, status, scope) {
+        const leave = await this.prisma.leave.findUnique({
+            where: { id: leaveId },
+            include: { user: { select: { organizationId: true } } },
+        });
         if (!leave)
             throw new common_1.NotFoundException('Leave request not found');
+        if (scope &&
+            scope.role !== client_1.Role.SUPER_ADMIN &&
+            scope.organizationId &&
+            leave.user.organizationId !== scope.organizationId) {
+            throw new common_1.ForbiddenException('Leave request is not in your organization');
+        }
         return this.prisma.leave.update({
             where: { id: leaveId },
-            data: { status }
+            data: { status },
         });
     }
     async cancelLeave(leaveId, userId) {
@@ -54,15 +64,20 @@ let HrService = HrService_1 = class HrService {
             orderBy: { startDate: 'desc' }
         });
     }
-    async getAllLeaves(query = {}) {
+    async getAllLeaves(query = {}, scope) {
         const page = query.page ?? 1;
         const limit = query.limit ?? 20;
         const skip = (page - 1) * limit;
+        const where = {};
+        if (query.status)
+            where.status = query.status;
+        if (query.userId)
+            where.userId = query.userId;
+        if (scope && scope.role !== client_1.Role.SUPER_ADMIN && scope.organizationId) {
+            where.user = { organizationId: scope.organizationId };
+        }
         return this.prisma.leave.findMany({
-            where: {
-                status: query.status,
-                userId: query.userId,
-            },
+            where,
             include: { user: { select: { firstName: true, lastName: true, email: true, role: true } } },
             orderBy: { startDate: 'desc' },
             skip,

@@ -1,10 +1,14 @@
 import { PrismaService } from '../prisma/prisma.service';
-import { Leave, LeaveStatus, Payslip, Prisma } from '@prisma/client';
+import { Leave, LeaveStatus, Payslip, Prisma, Role } from '@prisma/client';
 interface LeaveListQuery {
     page?: number;
     limit?: number;
     status?: LeaveStatus;
     userId?: string;
+}
+export interface LeaveListScope {
+    organizationId?: string | null;
+    role: Role;
 }
 interface PayslipListQuery {
     page?: number;
@@ -18,10 +22,10 @@ export declare class HrService {
     private readonly logger;
     constructor(prisma: PrismaService);
     requestLeave(userId: string, data: Prisma.LeaveCreateInput): Promise<Leave>;
-    updateLeaveStatus(leaveId: string, status: LeaveStatus): Promise<Leave>;
+    updateLeaveStatus(leaveId: string, status: LeaveStatus, scope?: LeaveListScope): Promise<Leave>;
     cancelLeave(leaveId: string, userId: string): Promise<void>;
     getMyLeaves(userId: string): Promise<Leave[]>;
-    getAllLeaves(query?: LeaveListQuery): Promise<Leave[]>;
+    getAllLeaves(query?: LeaveListQuery, scope?: LeaveListScope): Promise<Leave[]>;
     generatePayslipForUser(userId: string, month: number, year: number): Promise<Payslip>;
     handleMonthlyPayroll(): Promise<void>;
     getMyPayslips(userId: string): Promise<Payslip[]>;

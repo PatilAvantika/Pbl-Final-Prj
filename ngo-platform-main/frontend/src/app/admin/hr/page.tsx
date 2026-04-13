@@ -1,11 +1,20 @@
 'use client';
 
 import { useState } from 'react';
-import api from '../../../lib/axios';
+import api from '../../../lib/api/client';
+import { getApiErrorMessage } from '../../../lib/api-errors';
 import { Users, FileText, CheckCircle, XCircle, Clock, AlertCircle } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../../context/AuthContext';
 import { hasPermission } from '../../../lib/permissions';
+
+function unwrapLeaveList(data: unknown): any[] {
+    if (Array.isArray(data)) return data;
+    if (data && typeof data === 'object' && 'data' in data && Array.isArray((data as { data: unknown }).data)) {
+        return (data as { data: any[] }).data;
+    }
+    return [];
+}
 
 export default function HrDashboardPage() {
     const { user } = useAuth();
@@ -18,11 +27,21 @@ export default function HrDashboardPage() {
     const [payslipFilterYear, setPayslipFilterYear] = useState('ALL');
     const queryClient = useQueryClient();
 
-    const { data: leaves = [], isLoading: loadingLeaves } = useQuery({
+    const {
+        data: leavesRaw,
+        isLoading: loadingLeaves,
+        isError: leavesError,
+        error: leavesErrorObj,
+        refetch: refetchLeaves,
+    } = useQuery({
         queryKey: ['hr-leaves'],
-        queryFn: async () => (await api.get('/hr/leaves/all?limit=200')).data,
+        queryFn: async () => {
+            const res = await api.get<unknown>('/hr/leaves/all?limit=200');
+            return unwrapLeaveList(res.data);
+        },
         enabled: activeTab === 'leaves',
     });
+    const leaves = leavesRaw ?? [];
 
     const { data: payslips = [], isLoading: loadingPayslips } = useQuery({
         queryKey: ['hr-payslips', payslipFilterMonth, payslipFilterYear],
@@ -40,7 +59,9 @@ export default function HrDashboardPage() {
     const updateLeaveMutation = useMutation({
         mutationFn: async ({ id, status }: { id: string; status: 'APPROVED' | 'REJECTED' }) =>
             api.put(`/hr/leaves/${id}/status`, { status }),
-        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['hr-leaves'] }),
+        onSuccess: () => {
+            void queryClient.invalidateQueries({ queryKey: ['hr-leaves'] });
+        },
     });
 
     const handleLeaveStatusUpdate = async (id: string, status: 'APPROVED' | 'REJECTED') => {
@@ -110,6 +131,22 @@ export default function HrDashboardPage() {
                 </div>
             </div>
 
+            {activeTab === 'leaves' && leavesError && (
+                <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-semibold flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4 shrink-0" />
+                        Could not load leave requests: {getApiErrorMessage(leavesErrorObj, 'Request failed')}
+                    </span>
+                    <button
+                        type="button"
+                        onClick={() => void refetchLeaves()}
+                        className="rounded-xl bg-red-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-red-700"
+                    >
+                        Retry
+                    </button>
+                </div>
+            )}
+
             <div className="flex space-x-2 border-b border-slate-200">
                 <button
                     onClick={() => setActiveTab('leaves')}
@@ -130,6 +167,11 @@ export default function HrDashboardPage() {
             {loading ? (
                 <div className="h-64 flex items-center justify-center bg-white rounded-3xl border border-slate-200">
                     <span className="animate-pulse font-bold text-slate-400">Loading HR Records...</span>
+                </div>
+            ) : activeTab === 'leaves' && leavesError ? (
+                <div className="rounded-3xl border border-slate-200 bg-slate-50 px-6 py-12 text-center text-slate-600">
+                    <p className="font-bold text-slate-800">Leave list unavailable</p>
+                    <p className="mt-1 text-sm">Fix the error above or retry after checking your role and API connection.</p>
                 </div>
             ) : activeTab === 'leaves' ? (
                 <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">

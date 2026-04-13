@@ -1,9 +1,10 @@
 'use client';
 
 import React, { Suspense, useEffect, useMemo, useState } from 'react';
-import { Role, useAuth } from '../../../context/AuthContext';
+import { useAuth, type User } from '../../../context/AuthContext';
+import type { Role } from '@/types/role';
 import { useSearchParams } from 'next/navigation';
-import api from '../../../lib/axios';
+import api from '../../../lib/api/client';
 import Link from 'next/link';
 import { Mail, Lock, ArrowRight, AlertCircle, Loader2 } from 'lucide-react';
 
@@ -20,22 +21,34 @@ function LoginPageContent() {
         const byPortal: Record<string, { title: string; allowedRoles: Role[]; email: string; password: string }> = {
             admin: {
                 title: 'Admin Login',
-                allowedRoles: ['SUPER_ADMIN', 'NGO_ADMIN', 'FIELD_COORDINATOR', 'HR_MANAGER', 'FINANCE_MANAGER', 'TEAM_LEADER'],
-                email: 'admin@fieldops.demo',
-                password: 'password123'
+                allowedRoles: ['SUPER_ADMIN', 'NGO_ADMIN', 'FIELD_COORDINATOR', 'HR_MANAGER', 'FINANCE_MANAGER'],
+                email: process.env.NEXT_PUBLIC_DEMO_ADMIN_EMAIL ?? '',
+                password: process.env.NEXT_PUBLIC_DEMO_ADMIN_PASSWORD ?? '',
+            },
+            'team-leader': {
+                title: 'Team Leader Login',
+                allowedRoles: ['TEAM_LEADER'],
+                email: process.env.NEXT_PUBLIC_DEMO_TEAM_LEADER_EMAIL ?? '',
+                password: process.env.NEXT_PUBLIC_DEMO_TEAM_LEADER_PASSWORD ?? '',
             },
             volunteer: {
                 title: 'Volunteer Login',
                 allowedRoles: ['VOLUNTEER'],
-                email: 'volunteer@fieldops.demo',
-                password: 'password123'
+                email: process.env.NEXT_PUBLIC_DEMO_VOLUNTEER_EMAIL ?? '',
+                password: process.env.NEXT_PUBLIC_DEMO_VOLUNTEER_PASSWORD ?? '',
             },
             staff: {
                 title: 'Staff Login',
                 allowedRoles: ['STAFF'],
-                email: 'staff@fieldops.demo',
-                password: 'password123'
-            }
+                email: process.env.NEXT_PUBLIC_DEMO_STAFF_EMAIL ?? '',
+                password: process.env.NEXT_PUBLIC_DEMO_STAFF_PASSWORD ?? '',
+            },
+            donor: {
+                title: 'Donor Login',
+                allowedRoles: ['DONOR'],
+                email: process.env.NEXT_PUBLIC_DEMO_DONOR_EMAIL ?? '',
+                password: process.env.NEXT_PUBLIC_DEMO_DONOR_PASSWORD ?? '',
+            },
         };
         return selectedPortal ? byPortal[selectedPortal] : null;
     }, [selectedPortal]);
@@ -53,13 +66,13 @@ function LoginPageContent() {
         setError(null);
 
         try {
-            const response = await api.post('/auth/login', { email, password });
-            const { access_token, user } = response.data;
-            if (portalConfig && !portalConfig.allowedRoles.includes(user.role)) {
+            const response = await api.post<{ user: User }>('/auth/login', { email, password });
+            const { user } = response.data;
+            if (portalConfig && !portalConfig.allowedRoles.includes(user.role as Role)) {
                 setError(`This account is not allowed in ${portalConfig.title}. Please use the correct portal.`);
                 return;
             }
-            login(access_token, user);
+            login(user);
             // Redirection is handled in login context based on role
         } catch (err: any) {
             setError(err.response?.data?.message || 'Invalid credentials. Please try again.');
@@ -161,11 +174,11 @@ function LoginPageContent() {
                             Back to Landing
                         </Link>
                     </div>
-                    {portalConfig && (
+                    {portalConfig && portalConfig.email ? (
                         <div className="mt-3 text-center text-xs text-slate-500 font-medium">
-                            Auto-filled demo credentials for this role.
+                            Demo fields pre-filled from environment. Clear and use your own account anytime.
                         </div>
-                    )}
+                    ) : null}
                 </div>
             </div>
         </div>

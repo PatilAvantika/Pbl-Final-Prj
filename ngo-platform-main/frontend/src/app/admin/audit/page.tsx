@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import api from '../../../lib/axios';
+import api from '../../../lib/api/client';
 import { useAuth } from '../../../context/AuthContext';
 import { hasPermission } from '../../../lib/permissions';
 
@@ -41,7 +41,10 @@ export default function AdminAuditPage() {
                         if (actionFilter !== 'ALL') params.set('action', actionFilter);
                         if (entityTypeFilter.trim()) params.set('entityType', entityTypeFilter.trim());
                         if (actorIdFilter.trim()) params.set('actorId', actorIdFilter.trim());
-                        const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
+                        const raw = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3002';
+                        const baseUrl = raw.replace(/\/$/, '').endsWith('/api/v1')
+                            ? raw.replace(/\/$/, '')
+                            : `${raw.replace(/\/$/, '')}/api/v1`;
                         window.open(`${baseUrl}/audit/export.csv?${params.toString()}`, '_blank', 'noopener,noreferrer');
                     }}
                     className="px-4 py-2 rounded-xl bg-slate-800 text-white font-bold text-sm"
