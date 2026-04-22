@@ -1,7 +1,20 @@
 {
   "name": "ngo-platform",
+  "version": "1.0.0",
   "private": true,
   "description": "Monorepo root. Prisma schema is in ngo-platform-main/backend — run migrations via scripts below, not bare npx prisma from this folder.",
+  "homepage": "https://github.com/PatilAvantika/Pbl-Final-Prj#readme",
+  "bugs": {
+    "url": "https://github.com/PatilAvantika/Pbl-Final-Prj/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PatilAvantika/Pbl-Final-Prj.git"
+  },
+  "license": "ISC",
+  "author": "",
+  "type": "commonjs",
+  "main": "index.js",
   "scripts": {
     "prisma:migrate": "npm run db:deploy --prefix ngo-platform-main/backend",
     "prisma:generate": "npm exec --prefix ngo-platform-main/backend -- prisma generate",
