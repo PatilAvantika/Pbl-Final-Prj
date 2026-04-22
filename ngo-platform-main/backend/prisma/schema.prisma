@@ -310,6 +310,7 @@ model Attendance {
   deviceId         String
   imageHash        String?    @unique // Duplicate detection
   imageUrl         String?
+  faceMatchScore   Float?
   uniqueRequestId  String     @unique // Idempotency key
   syncStatus       SyncStatus @default(SYNCED)
   

@@ -8,37 +8,71 @@ declare class AttendanceOverrideDto {
 export declare class AttendanceController {
     private readonly attendanceService;
     constructor(attendanceService: AttendanceService);
+    mark(req: any, data: ClockInDto): Promise<{
+        success: boolean;
+        message: string;
+        faceMatchScore: number;
+        attendance: {
+            syncStatus: import("@prisma/client").$Enums.SyncStatus;
+            id: string;
+            deviceId: string;
+            userId: string;
+            taskId: string | null;
+            timestamp: Date;
+            type: string;
+            lat: number;
+            lng: number;
+            accuracyMeters: number;
+            reverseGeoName: string | null;
+            imageHash: string | null;
+            imageUrl: string | null;
+            faceMatchScore: number | null;
+            uniqueRequestId: string;
+        };
+    }>;
     clockIn(req: any, data: ClockInDto): Promise<{
-        syncStatus: import("@prisma/client").$Enums.SyncStatus;
-        id: string;
-        deviceId: string;
-        userId: string;
-        taskId: string | null;
-        timestamp: Date;
-        type: string;
-        lat: number;
-        lng: number;
-        accuracyMeters: number;
-        reverseGeoName: string | null;
-        imageHash: string | null;
-        imageUrl: string | null;
-        uniqueRequestId: string;
+        success: boolean;
+        message: string;
+        faceMatchScore: number;
+        attendance: {
+            syncStatus: import("@prisma/client").$Enums.SyncStatus;
+            id: string;
+            deviceId: string;
+            userId: string;
+            taskId: string | null;
+            timestamp: Date;
+            type: string;
+            lat: number;
+            lng: number;
+            accuracyMeters: number;
+            reverseGeoName: string | null;
+            imageHash: string | null;
+            imageUrl: string | null;
+            faceMatchScore: number | null;
+            uniqueRequestId: string;
+        };
     }>;
     clockOut(req: any, data: ClockInDto): Promise<{
-        syncStatus: import("@prisma/client").$Enums.SyncStatus;
-        id: string;
-        deviceId: string;
-        userId: string;
-        taskId: string | null;
-        timestamp: Date;
-        type: string;
-        lat: number;
-        lng: number;
-        accuracyMeters: number;
-        reverseGeoName: string | null;
-        imageHash: string | null;
-        imageUrl: string | null;
-        uniqueRequestId: string;
+        success: boolean;
+        message: string;
+        faceMatchScore: number;
+        attendance: {
+            syncStatus: import("@prisma/client").$Enums.SyncStatus;
+            id: string;
+            deviceId: string;
+            userId: string;
+            taskId: string | null;
+            timestamp: Date;
+            type: string;
+            lat: number;
+            lng: number;
+            accuracyMeters: number;
+            reverseGeoName: string | null;
+            imageHash: string | null;
+            imageUrl: string | null;
+            faceMatchScore: number | null;
+            uniqueRequestId: string;
+        };
     }>;
     getMyAttendances(req: any): Promise<({
         task: {
@@ -73,6 +107,7 @@ export declare class AttendanceController {
         reverseGeoName: string | null;
         imageHash: string | null;
         imageUrl: string | null;
+        faceMatchScore: number | null;
         uniqueRequestId: string;
     })[]>;
     listAttendanceForTask(taskId: string, req: any): Promise<{
@@ -88,7 +123,7 @@ export declare class AttendanceController {
         name: string;
         checkInAt: string;
         gpsOk: boolean;
-        faceVerified: boolean;
+        faceMatchScore: number | null;
         suspicious: boolean;
     }[]>;
     override(req: any, body: AttendanceOverrideDto): Promise<{
@@ -120,6 +155,7 @@ export declare class AttendanceController {
         reverseGeoName: string | null;
         imageHash: string | null;
         imageUrl: string | null;
+        faceMatchScore: number | null;
         uniqueRequestId: string;
     })[]>;
 }

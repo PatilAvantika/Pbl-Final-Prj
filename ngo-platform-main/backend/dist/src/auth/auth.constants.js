@@ -6,6 +6,8 @@ exports.getAccessTokenTtlSec = getAccessTokenTtlSec;
 exports.getRefreshTokenTtlSec = getRefreshTokenTtlSec;
 exports.getCookieSecure = getCookieSecure;
 exports.getCookieSameSite = getCookieSameSite;
+exports.getRoleLoginPassword = getRoleLoginPassword;
+const client_1 = require("@prisma/client");
 function getJwtSecret() {
     const s = process.env.JWT_SECRET?.trim();
     if (!s) {
@@ -48,5 +50,29 @@ function getCookieSameSite() {
     if (v === 'strict' || v === 'none' || v === 'lax')
         return v;
     return 'lax';
+}
+function rolePasswordEnvKey(role) {
+    return `ROLE_PASSWORD_${role}`;
+}
+function getRoleLoginPassword(role) {
+    const envPassword = process.env[rolePasswordEnvKey(role)]?.trim();
+    if (envPassword) {
+        return envPassword;
+    }
+    if (process.env.NODE_ENV === 'production') {
+        return null;
+    }
+    const defaults = {
+        [client_1.Role.SUPER_ADMIN]: 'SuperAdmin@1234',
+        [client_1.Role.NGO_ADMIN]: 'Admin@1234',
+        [client_1.Role.HR_MANAGER]: 'HR@1234',
+        [client_1.Role.FINANCE_MANAGER]: 'Finance@1234',
+        [client_1.Role.FIELD_COORDINATOR]: 'Coordinator@1234',
+        [client_1.Role.TEAM_LEADER]: 'TeamLeader@1234',
+        [client_1.Role.VOLUNTEER]: 'Volunteer@1234',
+        [client_1.Role.STAFF]: 'Staff@1234',
+        [client_1.Role.DONOR]: 'Donor@1234',
+    };
+    return defaults[role] ?? null;
 }
 //# sourceMappingURL=auth.constants.js.map

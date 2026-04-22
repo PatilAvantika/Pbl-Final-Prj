@@ -6,6 +6,7 @@ import Link from 'next/link';
 import api from '@/lib/api/client';
 import { getApiErrorMessage } from '@/lib/api-errors';
 import { buildAttendanceClockPayload } from '@/lib/clock-payload';
+import { captureAttendanceFaceSequence } from '@/lib/clock-payload';
 import {
     ArrowLeft, MapPin, Navigation, Clock, Camera,
     Loader2, AlertCircle, CheckCircle, ExternalLink, Calendar,
@@ -36,7 +37,7 @@ type AttendanceRow = {
 
 function lastTodayStatus(history: AttendanceRow[], taskId: string): 'CLOCK_IN' | 'CLOCK_OUT' | null {
     const start = new Date(); start.setHours(0, 0, 0, 0);
-    const end   = new Date(); end.setHours(23, 59, 59, 999);
+    const end = new Date(); end.setHours(23, 59, 59, 999);
     const todays = history
         .filter((h) => h.taskId === taskId && new Date(h.timestamp) >= start && new Date(h.timestamp) <= end)
         .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
@@ -45,35 +46,35 @@ function lastTodayStatus(history: AttendanceRow[], taskId: string): 'CLOCK_IN' |
 
 const TEMPLATE_LABELS: Record<string, string> = {
     WASTE_COLLECTION: 'Waste Collection',
-    PLANTATION:       'Tree Plantation',
-    AWARENESS:        'Awareness Campaign',
-    SURVEY:           'Community Survey',
-    TRAINING:         'Training Session',
+    PLANTATION: 'Tree Plantation',
+    AWARENESS: 'Awareness Campaign',
+    SURVEY: 'Community Survey',
+    TRAINING: 'Training Session',
 };
 
 const TEMPLATE_EMOJI: Record<string, string> = {
     WASTE_COLLECTION: '🗑️',
-    PLANTATION:       '🌱',
-    AWARENESS:        '📢',
-    SURVEY:           '📋',
-    TRAINING:         '🎓',
+    PLANTATION: '🌱',
+    AWARENESS: '📢',
+    SURVEY: '📋',
+    TRAINING: '🎓',
 };
 
 const PRIORITY_COLOR: Record<string, string> = {
-    HIGH:   'bg-red-500',
+    HIGH: 'bg-red-500',
     MEDIUM: 'bg-amber-400',
-    LOW:    'bg-emerald-500',
+    LOW: 'bg-emerald-500',
 };
 
 export default function TaskDetailPage({ params }: { params: Promise<{ id: string }> }) {
     const router = useRouter();
     const { id } = use(params);
 
-    const [task, setTask]       = useState<Task | null>(null);
+    const [task, setTask] = useState<Task | null>(null);
     const [history, setHistory] = useState<AttendanceRow[]>([]);
     const [loading, setLoading] = useState(true);
     const [clocking, setClocking] = useState<'in' | 'out' | null>(null);
-    const [errorMsg, setErrorMsg]   = useState<string | null>(null);
+    const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
     const fetchData = useCallback(async () => {
@@ -101,38 +102,46 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
         return deviceId;
     };
 
-    const attemptClock = (kind: 'in' | 'out') => {
+    const attemptClock = async (kind: 'in' | 'out') => {
         setErrorMsg(null);
         setSuccessMsg(null);
         setClocking(kind);
 
-        if (!navigator.geolocation) {
-            setErrorMsg('Geolocation not supported by your browser.');
-            setClocking(null);
-            return;
-        }
+        try {
+            const faceCapture = await captureAttendanceFaceSequence();
 
-        navigator.geolocation.getCurrentPosition(
-            async (position) => {
-                try {
-                    const payload = buildAttendanceClockPayload(
-                        id,
-                        position,
-                        getDeviceId(),
-                        `REQ_${uuidv4()}`,
-                    );
-                    await api.post(kind === 'in' ? '/attendance/clock-in' : '/attendance/clock-out', payload);
-                    setSuccessMsg(kind === 'in' ? 'Clocked in — GPS verified.' : 'Clocked out — shift logged.');
-                    await fetchData();
-                } catch (error: unknown) {
-                    setErrorMsg(getApiErrorMessage(error, `Failed to clock ${kind}.`));
-                } finally {
-                    setClocking(null);
-                }
-            },
-            (err) => { setErrorMsg('GPS Error: ' + err.message); setClocking(null); },
-            { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
-        );
+            if (!navigator.geolocation) {
+                setErrorMsg('Geolocation not supported by your browser.');
+                setClocking(null);
+                return;
+            }
+
+            navigator.geolocation.getCurrentPosition(
+                async (position) => {
+                    try {
+                        const payload = buildAttendanceClockPayload(
+                            id,
+                            position,
+                            getDeviceId(),
+                            `REQ_${uuidv4()}`,
+                            faceCapture,
+                        );
+                        await api.post(kind === 'in' ? '/attendance/clock-in' : '/attendance/clock-out', payload);
+                        setSuccessMsg(kind === 'in' ? 'Clocked in — GPS and face verified.' : 'Clocked out — shift logged.');
+                        await fetchData();
+                    } catch (error: unknown) {
+                        setErrorMsg(getApiErrorMessage(error, `Failed to clock ${kind}.`));
+                    } finally {
+                        setClocking(null);
+                    }
+                },
+                (err) => { setErrorMsg('GPS Error: ' + err.message); setClocking(null); },
+                { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
+            );
+        } catch (error: unknown) {
+            setErrorMsg(getApiErrorMessage(error, `Failed to clock ${kind}.`));
+            setClocking(null);
+        }
     };
 
     if (loading) {
@@ -158,11 +167,11 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
         );
     }
 
-    const last         = lastTodayStatus(history, task.id);
-    const showClockIn  = last !== 'CLOCK_IN' && last !== 'CLOCK_OUT';
+    const last = lastTodayStatus(history, task.id);
+    const showClockIn = last !== 'CLOCK_IN' && last !== 'CLOCK_OUT';
     const showClockOut = last === 'CLOCK_IN';
-    const isDone       = last === 'CLOCK_OUT';
-    const mapsUrl      = `https://www.openstreetmap.org/?mlat=${task.geofenceLat}&mlon=${task.geofenceLng}&zoom=16`;
+    const isDone = last === 'CLOCK_OUT';
+    const mapsUrl = `https://www.openstreetmap.org/?mlat=${task.geofenceLat}&mlon=${task.geofenceLng}&zoom=16`;
 
     return (
         <div className="min-h-screen bg-[#F0F7F4] pb-24">
@@ -231,9 +240,9 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
                 {/* Time & geofence info */}
                 <div className="bg-white rounded-2xl shadow-sm border border-slate-100 grid grid-cols-3 divide-x divide-slate-100">
                     {[
-                        { icon: Clock,    label: 'Start',   value: new Date(task.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) },
-                        { icon: Clock,    label: 'End',     value: new Date(task.endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) },
-                        { icon: MapPin,   label: 'Radius',  value: `${task.geofenceRadius}m` },
+                        { icon: Clock, label: 'Start', value: new Date(task.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) },
+                        { icon: Clock, label: 'End', value: new Date(task.endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) },
+                        { icon: MapPin, label: 'Radius', value: `${task.geofenceRadius}m` },
                     ].map(({ icon: Icon, label, value }) => (
                         <div key={label} className="p-4">
                             <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 flex items-center gap-1 mb-1.5">

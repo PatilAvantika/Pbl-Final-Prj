@@ -7,6 +7,7 @@ import api from '../../../lib/api/client';
 import { useAuth } from '../../../context/AuthContext';
 import { getApiErrorMessage } from '@/lib/api-errors';
 import { buildAttendanceClockPayload } from '@/lib/clock-payload';
+import { captureAttendanceFaceSequence } from '@/lib/clock-payload';
 import { useDashboardStats, volunteerDashboardQueryKey } from '@/features/volunteer/hooks/useDashboardStats';
 import { useActiveTasks, volunteerActiveTasksQueryKey } from '@/features/volunteer/hooks/useActiveTasks';
 import { useAttendanceSummary, attendanceSummaryQueryKey } from '@/features/volunteer/hooks/useAttendanceSummary';
@@ -176,41 +177,49 @@ export default function VolunteerDashboard() {
         return deviceId;
     };
 
-    const attemptClock = (taskId: string, kind: 'in' | 'out') => {
+    const attemptClock = async (taskId: string, kind: 'in' | 'out') => {
         setErrorMsg(null);
         setSuccessMsg(null);
         setClocking(taskId);
 
-        if (!navigator.geolocation) {
-            setErrorMsg('Geolocation not supported by your browser.');
-            setClocking(null);
-            return;
-        }
+        try {
+            const faceCapture = await captureAttendanceFaceSequence();
 
-        navigator.geolocation.getCurrentPosition(
-            async (position) => {
-                try {
-                    const payload = buildAttendanceClockPayload(
-                        taskId,
-                        position,
-                        getDeviceId(),
-                        `REQ_${uuidv4()}`,
-                    );
-                    await api.post(kind === 'in' ? '/attendance/clock-in' : '/attendance/clock-out', payload);
-                    setSuccessMsg(kind === 'in' ? 'Clocked in — GPS verified.' : 'Clocked out — shift logged.');
-                    await refetchAfterClock();
-                } catch (error: unknown) {
-                    setErrorMsg(getApiErrorMessage(error, `Failed to clock ${kind}.`));
-                } finally {
-                    setClocking(null);
-                }
-            },
-            (error) => {
-                setErrorMsg('GPS Error: ' + error.message);
+            if (!navigator.geolocation) {
+                setErrorMsg('Geolocation not supported by your browser.');
                 setClocking(null);
-            },
-            { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
-        );
+                return;
+            }
+
+            navigator.geolocation.getCurrentPosition(
+                async (position) => {
+                    try {
+                        const payload = buildAttendanceClockPayload(
+                            taskId,
+                            position,
+                            getDeviceId(),
+                            `REQ_${uuidv4()}`,
+                            faceCapture,
+                        );
+                        await api.post(kind === 'in' ? '/attendance/clock-in' : '/attendance/clock-out', payload);
+                        setSuccessMsg(kind === 'in' ? 'Clocked in — GPS and face verified.' : 'Clocked out — shift logged.');
+                        await refetchAfterClock();
+                    } catch (error: unknown) {
+                        setErrorMsg(getApiErrorMessage(error, `Failed to clock ${kind}.`));
+                    } finally {
+                        setClocking(null);
+                    }
+                },
+                (error) => {
+                    setErrorMsg('GPS Error: ' + error.message);
+                    setClocking(null);
+                },
+                { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
+            );
+        } catch (error: unknown) {
+            setErrorMsg(getApiErrorMessage(error, `Failed to clock ${kind}.`));
+            setClocking(null);
+        }
     };
 
     const recentReports = reportRows.slice(0, 5);
@@ -411,13 +420,12 @@ export default function VolunteerDashboard() {
                                         </p>
                                     </div>
                                     <span
-                                        className={`text-[9px] font-bold px-2.5 py-1 rounded-full border uppercase tracking-wide flex-shrink-0 ${
-                                            r.status === 'APPROVED'
+                                        className={`text-[9px] font-bold px-2.5 py-1 rounded-full border uppercase tracking-wide flex-shrink-0 ${r.status === 'APPROVED'
                                                 ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
                                                 : r.status === 'REJECTED'
-                                                  ? 'bg-red-50 text-red-600 border-red-100'
-                                                  : 'bg-slate-100 text-slate-500 border-slate-200'
-                                        }`}
+                                                    ? 'bg-red-50 text-red-600 border-red-100'
+                                                    : 'bg-slate-100 text-slate-500 border-slate-200'
+                                            }`}
                                     >
                                         {r.status}
                                     </span>

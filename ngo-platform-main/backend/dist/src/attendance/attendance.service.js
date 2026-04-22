@@ -20,7 +20,11 @@ const tasks_service_1 = require("../tasks/tasks.service");
 const geo_util_1 = require("../utils/geo.util");
 const client_1 = require("@prisma/client");
 const volunteer_cache_service_1 = require("../volunteer/volunteer-cache.service");
+const attendance_face_util_1 = require("./attendance-face.util");
 const ATTENDANCE_TIME_GRACE_MS = 60 * 60 * 1000;
+const FACE_MATCH_THRESHOLD = 0.7;
+const FACE_PRESENCE_THRESHOLD = 0.42;
+const LIVENESS_THRESHOLD = 0.02;
 let AttendanceService = AttendanceService_1 = class AttendanceService {
     prisma;
     tasksService;
@@ -57,6 +61,59 @@ let AttendanceService = AttendanceService_1 = class AttendanceService {
     async invalidateVolunteerDashboard(userId) {
         await this.volunteerCache?.invalidateForUser(userId);
     }
+    async getUserFaceTemplate(userId) {
+        const user = await this.prisma.user.findUnique({
+            where: { id: userId },
+            select: { faceEnrollmentSamples: true, onboardingFaceComplete: true },
+        });
+        if (!user?.onboardingFaceComplete) {
+            return null;
+        }
+        return (0, attendance_face_util_1.buildAttendanceFaceTemplate)(user.faceEnrollmentSamples);
+    }
+    validateAttendanceWindow(taskStart, taskEnd, now = new Date()) {
+        if (now < taskStart || now > taskEnd) {
+            throw new common_1.BadRequestException('Task is not currently active');
+        }
+    }
+    async fetchMarkAttendanceTask(userId, role, organizationId, taskId) {
+        await this.tasksService.assertUserAssignedToTask(userId, taskId);
+        const task = await this.tasksService.findOneForRequester(taskId, userId, role, organizationId);
+        if (!task.isActive) {
+            throw new common_1.BadRequestException('Task is not currently active');
+        }
+        this.validateAttendanceWindow(task.startTime, task.endTime);
+        return task;
+    }
+    getAttendanceFrames(data) {
+        const images = [data.image, ...(data.imageSequence ?? [])].filter((v) => typeof v === 'string' && v.trim().length > 0);
+        if (images.length === 0) {
+            throw new common_1.BadRequestException('Attendance image is required');
+        }
+        return images.map((image) => (0, attendance_face_util_1.decodeAttendanceFrame)(image));
+    }
+    async compareFaceTemplate(userId, data) {
+        const template = await this.getUserFaceTemplate(userId);
+        if (!template) {
+            throw new common_1.BadRequestException('Face enrollment is required before marking attendance');
+        }
+        const frames = this.getAttendanceFrames(data);
+        const liveFrame = frames[0];
+        const presenceScore = (0, attendance_face_util_1.detectFacePresence)(liveFrame);
+        if (presenceScore < FACE_PRESENCE_THRESHOLD) {
+            throw new common_1.BadRequestException('Unable to detect a valid face in the attendance capture');
+        }
+        const livenessScore = (0, attendance_face_util_1.estimateLivenessScore)(frames);
+        if (livenessScore < LIVENESS_THRESHOLD) {
+            throw new common_1.BadRequestException('Spoof detected');
+        }
+        const liveEmbedding = (0, attendance_face_util_1.frameToEmbedding)(liveFrame);
+        const faceMatchScore = (0, attendance_face_util_1.cosineSimilarity)(liveEmbedding, template);
+        if (faceMatchScore < FACE_MATCH_THRESHOLD) {
+            throw new common_1.BadRequestException('Face mismatch');
+        }
+        return faceMatchScore;
+    }
     dayBounds() {
         const now = new Date();
         const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
@@ -85,93 +142,104 @@ let AttendanceService = AttendanceService_1 = class AttendanceService {
         }
         return task;
     }
-    async clockIn(userId, role, organizationId, data) {
+    async markAttendance(userId, role, organizationId, data) {
+        const task = await this.fetchMarkAttendanceTask(userId, role, organizationId, data.taskId);
+        const faceMatchScore = await this.compareFaceTemplate(userId, data);
+        const primaryFrame = (0, attendance_face_util_1.decodeAttendanceFrame)(data.image ?? data.imageSequence?.[0] ?? '');
+        const imageHash = (0, attendance_face_util_1.hashAttendanceImage)(primaryFrame);
+        const distance = (0, geo_util_1.getDistanceFromLatLonInMeters)(data.lat, data.lng, task.geofenceLat, task.geofenceLng);
+        const allowedRadius = task.geofenceRadius + data.accuracyMeters;
+        if (distance > allowedRadius) {
+            throw new common_1.BadRequestException('Outside geofence');
+        }
         const existingReq = await this.prisma.attendance.findUnique({
             where: { uniqueRequestId: data.uniqueRequestId },
         });
-        if (existingReq)
-            return existingReq;
-        await this.validateTaskWindowAndGeofence(userId, role, organizationId, data.taskId, data);
+        if (existingReq) {
+            return {
+                success: true,
+                message: 'Attendance recorded',
+                faceMatchScore: existingReq.faceMatchScore ?? faceMatchScore,
+                attendance: existingReq,
+            };
+        }
         const { startOfDay, endOfDay } = this.dayBounds();
-        const existingClockIn = await this.prisma.attendance.findFirst({
-            where: {
-                userId,
-                taskId: data.taskId,
-                type: 'CLOCK_IN',
-                timestamp: { gte: startOfDay, lte: endOfDay },
-            },
-        });
-        if (existingClockIn) {
-            throw new common_1.ConflictException('You have already clocked in for this task today.');
-        }
-        const globalOpen = await this.findGloballyOpenTaskId(userId);
-        if (globalOpen !== null && globalOpen !== data.taskId) {
-            throw new common_1.ConflictException({
-                code: 'ATTENDANCE_SESSION_ACTIVE_ELSEWHERE',
-                message: 'You already have an active clock-in on another task. Clock out there first.',
+        if (data.type === 'CLOCK_IN') {
+            const existingClockIn = await this.prisma.attendance.findFirst({
+                where: {
+                    userId,
+                    taskId: data.taskId,
+                    type: 'CLOCK_IN',
+                    timestamp: { gte: startOfDay, lte: endOfDay },
+                },
             });
+            if (existingClockIn) {
+                throw new common_1.ConflictException('You have already clocked in for this task today.');
+            }
+            const globalOpen = await this.findGloballyOpenTaskId(userId);
+            if (globalOpen !== null && globalOpen !== data.taskId) {
+                throw new common_1.ConflictException({
+                    code: 'ATTENDANCE_SESSION_ACTIVE_ELSEWHERE',
+                    message: 'You already have an active clock-in on another task. Clock out there first.',
+                });
+            }
         }
-        const created = await this.prisma.attendance.create({
-            data: {
-                userId,
-                taskId: data.taskId,
-                type: 'CLOCK_IN',
-                lat: data.lat,
-                lng: data.lng,
-                accuracyMeters: data.accuracyMeters,
-                deviceId: data.deviceId,
-                uniqueRequestId: data.uniqueRequestId,
-                imageHash: data.imageHash,
-                imageUrl: data.imageUrl,
-                syncStatus: client_1.SyncStatus.SYNCED,
-            },
-        });
-        await this.invalidateVolunteerDashboard(userId);
-        return created;
+        else {
+            const todays = await this.prisma.attendance.findMany({
+                where: {
+                    userId,
+                    taskId: data.taskId,
+                    timestamp: { gte: startOfDay, lte: endOfDay },
+                },
+                orderBy: { timestamp: 'asc' },
+            });
+            if (todays.length === 0) {
+                throw new common_1.BadRequestException('Clock in before clocking out.');
+            }
+            const last = todays[todays.length - 1];
+            if (last.type === 'CLOCK_OUT') {
+                throw new common_1.ConflictException('You have already clocked out for this task today.');
+            }
+            if (last.type !== 'CLOCK_IN') {
+                throw new common_1.BadRequestException('Invalid attendance sequence for today.');
+            }
+        }
+        try {
+            const created = await this.prisma.attendance.create({
+                data: {
+                    userId,
+                    taskId: data.taskId,
+                    type: data.type,
+                    lat: data.lat,
+                    lng: data.lng,
+                    accuracyMeters: data.accuracyMeters,
+                    deviceId: data.deviceId,
+                    uniqueRequestId: data.uniqueRequestId,
+                    imageHash,
+                    syncStatus: client_1.SyncStatus.SYNCED,
+                    faceMatchScore,
+                },
+            });
+            await this.invalidateVolunteerDashboard(userId);
+            return {
+                success: true,
+                message: 'Attendance recorded',
+                faceMatchScore,
+                attendance: created,
+            };
+        }
+        catch (error) {
+            if (error instanceof Error) {
+                this.logger.error(`markAttendance failed userId=${userId} taskId=${data.taskId} message=${error.message}`, error.stack);
+            }
+            throw error;
+        }
+    }
+    async clockIn(userId, role, organizationId, data) {
+        return this.markAttendance(userId, role, organizationId, { ...data, type: 'CLOCK_IN' });
     }
     async clockOut(userId, role, organizationId, data) {
-        const existingReq = await this.prisma.attendance.findUnique({
-            where: { uniqueRequestId: data.uniqueRequestId },
-        });
-        if (existingReq)
-            return existingReq;
-        await this.validateTaskWindowAndGeofence(userId, role, organizationId, data.taskId, data);
-        const { startOfDay, endOfDay } = this.dayBounds();
-        const todays = await this.prisma.attendance.findMany({
-            where: {
-                userId,
-                taskId: data.taskId,
-                timestamp: { gte: startOfDay, lte: endOfDay },
-            },
-            orderBy: { timestamp: 'asc' },
-        });
-        if (todays.length === 0) {
-            throw new common_1.BadRequestException('Clock in before clocking out.');
-        }
-        const last = todays[todays.length - 1];
-        if (last.type === 'CLOCK_OUT') {
-            throw new common_1.ConflictException('You have already clocked out for this task today.');
-        }
-        if (last.type !== 'CLOCK_IN') {
-            throw new common_1.BadRequestException('Invalid attendance sequence for today.');
-        }
-        const created = await this.prisma.attendance.create({
-            data: {
-                userId,
-                taskId: data.taskId,
-                type: 'CLOCK_OUT',
-                lat: data.lat,
-                lng: data.lng,
-                accuracyMeters: data.accuracyMeters,
-                deviceId: data.deviceId,
-                uniqueRequestId: data.uniqueRequestId,
-                imageHash: data.imageHash,
-                imageUrl: data.imageUrl,
-                syncStatus: client_1.SyncStatus.SYNCED,
-            },
-        });
-        await this.invalidateVolunteerDashboard(userId);
-        return created;
+        return this.markAttendance(userId, role, organizationId, { ...data, type: 'CLOCK_OUT' });
     }
     async getMyAttendances(userId) {
         return this.prisma.attendance.findMany({
@@ -243,7 +311,7 @@ let AttendanceService = AttendanceService_1 = class AttendanceService {
             name: `${a.user.firstName} ${a.user.lastName}`.trim(),
             checkInAt: a.timestamp.toISOString(),
             gpsOk: a.accuracyMeters < 400,
-            faceVerified: Boolean(a.imageUrl),
+            faceMatchScore: a.faceMatchScore,
             suspicious: a.accuracyMeters >= 250,
         }));
     }

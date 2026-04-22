@@ -50,6 +50,19 @@ let AttendanceController = class AttendanceController {
     constructor(attendanceService) {
         this.attendanceService = attendanceService;
     }
+    async mark(req, data) {
+        if (data.type !== 'CLOCK_IN' && data.type !== 'CLOCK_OUT') {
+            throw new common_1.BadRequestException('type must be CLOCK_IN or CLOCK_OUT');
+        }
+        if (data.lat === undefined || data.lat === null) {
+            throw new common_1.BadRequestException('Missing latitude for attendance');
+        }
+        if (data.lng === undefined || data.lng === null) {
+            throw new common_1.BadRequestException('Missing longitude for attendance');
+        }
+        const organizationId = requireOrganizationId(req);
+        return this.attendanceService.markAttendance(req.user.id, req.user.role, organizationId, data);
+    }
     async clockIn(req, data) {
         if (data.lat === undefined || data.lat === null) {
             throw new common_1.BadRequestException('Missing latitude for geo-verified clock-in');
@@ -88,6 +101,14 @@ let AttendanceController = class AttendanceController {
     }
 };
 exports.AttendanceController = AttendanceController;
+__decorate([
+    (0, common_1.Post)('mark'),
+    __param(0, (0, common_1.Request)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, clock_in_dto_1.ClockInDto]),
+    __metadata("design:returntype", Promise)
+], AttendanceController.prototype, "mark", null);
 __decorate([
     (0, common_1.Post)('clock-in'),
     __param(0, (0, common_1.Request)()),

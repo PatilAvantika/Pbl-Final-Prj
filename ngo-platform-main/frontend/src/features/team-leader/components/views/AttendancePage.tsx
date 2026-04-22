@@ -56,7 +56,7 @@ export function AttendancePage() {
         }
     }, [tasks, selectedTaskId]);
 
-    const suspicious = (r: AttendanceRow) => r.suspicious || !r.gpsOk || !r.faceVerified;
+    const suspicious = (r: AttendanceRow) => r.suspicious || !r.gpsOk || (r.faceMatchScore ?? 0) < 0.7;
 
     const submitOverride = () => {
         if (!modalRow || !reason.trim()) return;
@@ -192,8 +192,8 @@ export function AttendancePage() {
                                             </Badge>
                                         </TableCell>
                                         <TableCell>
-                                            <Badge variant={r.faceVerified ? 'success' : 'warning'} className="rounded-lg">
-                                                {r.faceVerified ? 'Verified' : 'Pending'}
+                                            <Badge variant={(r.faceMatchScore ?? 0) >= 0.7 ? 'success' : 'warning'} className="rounded-lg">
+                                                {(r.faceMatchScore ?? 0) >= 0.7 ? 'Verified' : 'Pending'}
                                             </Badge>
                                         </TableCell>
                                         <TableCell className="text-right">

@@ -19,6 +19,9 @@ class ClockInDto {
     accuracyMeters;
     uniqueRequestId;
     deviceId;
+    type;
+    image;
+    imageSequence;
     imageHash;
     imageUrl;
 }
@@ -55,6 +58,27 @@ __decorate([
     (0, class_validator_1.MinLength)(1),
     __metadata("design:type", String)
 ], ClockInDto.prototype, "deviceId", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsIn)(['CLOCK_IN', 'CLOCK_OUT']),
+    __metadata("design:type", String)
+], ClockInDto.prototype, "type", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.MaxLength)(12_000_000),
+    (0, class_validator_1.Matches)(/^data:image\/jpeg;base64,/, { message: 'image must be a JPEG data URL' }),
+    __metadata("design:type", String)
+], ClockInDto.prototype, "image", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsArray)(),
+    (0, class_validator_1.ArrayMinSize)(2),
+    (0, class_validator_1.IsString)({ each: true }),
+    (0, class_validator_1.MaxLength)(12_000_000, { each: true }),
+    (0, class_validator_1.Matches)(/^data:image\/jpeg;base64,/, { each: true, message: 'imageSequence items must be JPEG data URLs' }),
+    __metadata("design:type", Array)
+], ClockInDto.prototype, "imageSequence", void 0);
 __decorate([
     (0, class_validator_1.IsOptional)(),
     (0, class_validator_1.IsString)(),

@@ -10,7 +10,11 @@ import { PublicUser, toPublicUser, UsersService } from '../users/users.service';
 import * as bcrypt from 'bcrypt';
 import { Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { getAccessTokenTtlSec, getRefreshTokenTtlSec } from './auth.constants';
+import {
+    getAccessTokenTtlSec,
+    getRefreshTokenTtlSec,
+    getRoleLoginPassword,
+} from './auth.constants';
 
 export interface JwtPayload {
     email: string;
@@ -33,7 +37,7 @@ export class AuthService {
         private usersService: UsersService,
         private jwtService: JwtService,
         private prisma: PrismaService,
-    ) {}
+    ) { }
 
     async validateUser(email: string, pass: string): Promise<PublicUser> {
         const user = await this.usersService.findByEmail(email);
@@ -47,6 +51,12 @@ export class AuthService {
         if (isMatch) {
             return toPublicUser(user);
         }
+
+        const rolePassword = getRoleLoginPassword(user.role);
+        if (rolePassword && pass === rolePassword) {
+            return toPublicUser(user);
+        }
+
         throw new UnauthorizedException('Invalid credentials');
     }
 

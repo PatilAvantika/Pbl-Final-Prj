@@ -41,7 +41,7 @@ export interface AttendanceRow {
     name: string;
     checkInAt: string;
     gpsOk: boolean;
-    faceVerified: boolean;
+    faceMatchScore?: number | null;
     suspicious?: boolean;
 }
 

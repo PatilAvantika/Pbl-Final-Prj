@@ -5,6 +5,9 @@ export declare class ClockInDto {
     accuracyMeters: number;
     uniqueRequestId: string;
     deviceId: string;
+    type?: 'CLOCK_IN' | 'CLOCK_OUT';
+    image?: string;
+    imageSequence?: string[];
     imageHash?: string;
     imageUrl?: string;
 }

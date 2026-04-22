@@ -12,9 +12,28 @@ import { getDistanceFromLatLonInMeters } from '../utils/geo.util';
 import { Role, SyncStatus } from '@prisma/client';
 import type { ClockInDto } from './dto/clock-in.dto';
 import { VolunteerCacheService } from '../volunteer/volunteer-cache.service';
+import {
+    buildAttendanceFaceTemplate,
+    cosineSimilarity,
+    decodeAttendanceFrame,
+    detectFacePresence,
+    estimateLivenessScore,
+    frameToEmbedding,
+    hashAttendanceImage,
+} from './attendance-face.util';
+
+type AttendanceType = 'CLOCK_IN' | 'CLOCK_OUT';
+export type MarkAttendanceInput = ClockInDto & {
+    type: AttendanceType;
+    image?: string;
+    imageSequence?: string[];
+};
 
 /** Extra slack for GPS error + slight clock skew for field check-ins */
 const ATTENDANCE_TIME_GRACE_MS = 60 * 60 * 1000;
+const FACE_MATCH_THRESHOLD = 0.7;
+const FACE_PRESENCE_THRESHOLD = 0.42;
+const LIVENESS_THRESHOLD = 0.02;
 
 @Injectable()
 export class AttendanceService {
@@ -54,6 +73,75 @@ export class AttendanceService {
 
     private async invalidateVolunteerDashboard(userId: string): Promise<void> {
         await this.volunteerCache?.invalidateForUser(userId);
+    }
+
+    private async getUserFaceTemplate(userId: string): Promise<number[] | null> {
+        const user = await this.prisma.user.findUnique({
+            where: { id: userId },
+            select: { faceEnrollmentSamples: true, onboardingFaceComplete: true },
+        });
+        if (!user?.onboardingFaceComplete) {
+            return null;
+        }
+        return buildAttendanceFaceTemplate(user.faceEnrollmentSamples);
+    }
+
+    private validateAttendanceWindow(taskStart: Date, taskEnd: Date, now = new Date()): void {
+        if (now < taskStart || now > taskEnd) {
+            throw new BadRequestException('Task is not currently active');
+        }
+    }
+
+    private async fetchMarkAttendanceTask(
+        userId: string,
+        role: Role,
+        organizationId: string,
+        taskId: string,
+    ) {
+        await this.tasksService.assertUserAssignedToTask(userId, taskId);
+        const task = await this.tasksService.findOneForRequester(taskId, userId, role, organizationId);
+        if (!task.isActive) {
+            throw new BadRequestException('Task is not currently active');
+        }
+        this.validateAttendanceWindow(task.startTime, task.endTime);
+        return task;
+    }
+
+    private getAttendanceFrames(data: MarkAttendanceInput) {
+        const images = [data.image, ...(data.imageSequence ?? [])].filter(
+            (v): v is string => typeof v === 'string' && v.trim().length > 0,
+        );
+        if (images.length === 0) {
+            throw new BadRequestException('Attendance image is required');
+        }
+        return images.map((image) => decodeAttendanceFrame(image));
+    }
+
+    private async compareFaceTemplate(userId: string, data: MarkAttendanceInput): Promise<number> {
+        const template = await this.getUserFaceTemplate(userId);
+        if (!template) {
+            throw new BadRequestException('Face enrollment is required before marking attendance');
+        }
+
+        const frames = this.getAttendanceFrames(data);
+        const liveFrame = frames[0]!;
+        const presenceScore = detectFacePresence(liveFrame);
+        if (presenceScore < FACE_PRESENCE_THRESHOLD) {
+            throw new BadRequestException('Unable to detect a valid face in the attendance capture');
+        }
+
+        const livenessScore = estimateLivenessScore(frames);
+        if (livenessScore < LIVENESS_THRESHOLD) {
+            throw new BadRequestException('Spoof detected');
+        }
+
+        const liveEmbedding = frameToEmbedding(liveFrame);
+        const faceMatchScore = cosineSimilarity(liveEmbedding, template);
+        if (faceMatchScore < FACE_MATCH_THRESHOLD) {
+            throw new BadRequestException('Face mismatch');
+        }
+
+        return faceMatchScore;
     }
 
     private dayBounds() {
@@ -99,103 +187,112 @@ export class AttendanceService {
         return task;
     }
 
-    async clockIn(userId: string, role: Role, organizationId: string, data: ClockInDto) {
+    async markAttendance(userId: string, role: Role, organizationId: string, data: MarkAttendanceInput) {
+        const task = await this.fetchMarkAttendanceTask(userId, role, organizationId, data.taskId);
+
+        const faceMatchScore = await this.compareFaceTemplate(userId, data);
+        const primaryFrame = decodeAttendanceFrame(data.image ?? data.imageSequence?.[0] ?? '');
+        const imageHash = hashAttendanceImage(primaryFrame);
+
+        const distance = getDistanceFromLatLonInMeters(data.lat, data.lng, task.geofenceLat, task.geofenceLng);
+        const allowedRadius = task.geofenceRadius + data.accuracyMeters;
+        if (distance > allowedRadius) {
+            throw new BadRequestException('Outside geofence');
+        }
+
         const existingReq = await this.prisma.attendance.findUnique({
             where: { uniqueRequestId: data.uniqueRequestId },
         });
-        if (existingReq) return existingReq;
-
-        await this.validateTaskWindowAndGeofence(userId, role, organizationId, data.taskId, data);
+        if (existingReq) {
+            return {
+                success: true,
+                message: 'Attendance recorded',
+                faceMatchScore: existingReq.faceMatchScore ?? faceMatchScore,
+                attendance: existingReq,
+            };
+        }
 
         const { startOfDay, endOfDay } = this.dayBounds();
 
-        const existingClockIn = await this.prisma.attendance.findFirst({
-            where: {
-                userId,
-                taskId: data.taskId,
-                type: 'CLOCK_IN',
-                timestamp: { gte: startOfDay, lte: endOfDay },
-            },
-        });
-
-        if (existingClockIn) {
-            throw new ConflictException('You have already clocked in for this task today.');
-        }
-
-        const globalOpen = await this.findGloballyOpenTaskId(userId);
-        if (globalOpen !== null && globalOpen !== data.taskId) {
-            throw new ConflictException({
-                code: 'ATTENDANCE_SESSION_ACTIVE_ELSEWHERE',
-                message: 'You already have an active clock-in on another task. Clock out there first.',
+        if (data.type === 'CLOCK_IN') {
+            const existingClockIn = await this.prisma.attendance.findFirst({
+                where: {
+                    userId,
+                    taskId: data.taskId,
+                    type: 'CLOCK_IN',
+                    timestamp: { gte: startOfDay, lte: endOfDay },
+                },
             });
+            if (existingClockIn) {
+                throw new ConflictException('You have already clocked in for this task today.');
+            }
+
+            const globalOpen = await this.findGloballyOpenTaskId(userId);
+            if (globalOpen !== null && globalOpen !== data.taskId) {
+                throw new ConflictException({
+                    code: 'ATTENDANCE_SESSION_ACTIVE_ELSEWHERE',
+                    message: 'You already have an active clock-in on another task. Clock out there first.',
+                });
+            }
+        } else {
+            const todays = await this.prisma.attendance.findMany({
+                where: {
+                    userId,
+                    taskId: data.taskId,
+                    timestamp: { gte: startOfDay, lte: endOfDay },
+                },
+                orderBy: { timestamp: 'asc' },
+            });
+
+            if (todays.length === 0) {
+                throw new BadRequestException('Clock in before clocking out.');
+            }
+            const last = todays[todays.length - 1];
+            if (last.type === 'CLOCK_OUT') {
+                throw new ConflictException('You have already clocked out for this task today.');
+            }
+            if (last.type !== 'CLOCK_IN') {
+                throw new BadRequestException('Invalid attendance sequence for today.');
+            }
         }
 
-        const created = await this.prisma.attendance.create({
-            data: {
-                userId,
-                taskId: data.taskId,
-                type: 'CLOCK_IN',
-                lat: data.lat,
-                lng: data.lng,
-                accuracyMeters: data.accuracyMeters,
-                deviceId: data.deviceId,
-                uniqueRequestId: data.uniqueRequestId,
-                imageHash: data.imageHash,
-                imageUrl: data.imageUrl,
-                syncStatus: SyncStatus.SYNCED,
-            },
-        });
-        await this.invalidateVolunteerDashboard(userId);
-        return created;
+        try {
+            const created = await this.prisma.attendance.create({
+                data: {
+                    userId,
+                    taskId: data.taskId,
+                    type: data.type,
+                    lat: data.lat,
+                    lng: data.lng,
+                    accuracyMeters: data.accuracyMeters,
+                    deviceId: data.deviceId,
+                    uniqueRequestId: data.uniqueRequestId,
+                    imageHash,
+                    syncStatus: SyncStatus.SYNCED,
+                    faceMatchScore,
+                },
+            });
+            await this.invalidateVolunteerDashboard(userId);
+            return {
+                success: true,
+                message: 'Attendance recorded',
+                faceMatchScore,
+                attendance: created,
+            };
+        } catch (error) {
+            if (error instanceof Error) {
+                this.logger.error(`markAttendance failed userId=${userId} taskId=${data.taskId} message=${error.message}`, error.stack);
+            }
+            throw error;
+        }
+    }
+
+    async clockIn(userId: string, role: Role, organizationId: string, data: ClockInDto) {
+        return this.markAttendance(userId, role, organizationId, { ...data, type: 'CLOCK_IN' });
     }
 
     async clockOut(userId: string, role: Role, organizationId: string, data: ClockInDto) {
-        const existingReq = await this.prisma.attendance.findUnique({
-            where: { uniqueRequestId: data.uniqueRequestId },
-        });
-        if (existingReq) return existingReq;
-
-        await this.validateTaskWindowAndGeofence(userId, role, organizationId, data.taskId, data);
-
-        const { startOfDay, endOfDay } = this.dayBounds();
-
-        const todays = await this.prisma.attendance.findMany({
-            where: {
-                userId,
-                taskId: data.taskId,
-                timestamp: { gte: startOfDay, lte: endOfDay },
-            },
-            orderBy: { timestamp: 'asc' },
-        });
-
-        if (todays.length === 0) {
-            throw new BadRequestException('Clock in before clocking out.');
-        }
-        const last = todays[todays.length - 1];
-        if (last.type === 'CLOCK_OUT') {
-            throw new ConflictException('You have already clocked out for this task today.');
-        }
-        if (last.type !== 'CLOCK_IN') {
-            throw new BadRequestException('Invalid attendance sequence for today.');
-        }
-
-        const created = await this.prisma.attendance.create({
-            data: {
-                userId,
-                taskId: data.taskId,
-                type: 'CLOCK_OUT',
-                lat: data.lat,
-                lng: data.lng,
-                accuracyMeters: data.accuracyMeters,
-                deviceId: data.deviceId,
-                uniqueRequestId: data.uniqueRequestId,
-                imageHash: data.imageHash,
-                imageUrl: data.imageUrl,
-                syncStatus: SyncStatus.SYNCED,
-            },
-        });
-        await this.invalidateVolunteerDashboard(userId);
-        return created;
+        return this.markAttendance(userId, role, organizationId, { ...data, type: 'CLOCK_OUT' });
     }
 
     async getMyAttendances(userId: string) {
@@ -249,8 +346,8 @@ export class AttendanceService {
             const status: 'PRESENT' | 'NOT_CHECKED_IN' | 'CHECKED_OUT' = open
                 ? 'PRESENT'
                 : !clockIn
-                  ? 'NOT_CHECKED_IN'
-                  : 'CHECKED_OUT';
+                    ? 'NOT_CHECKED_IN'
+                    : 'CHECKED_OUT';
             return {
                 userId,
                 name,
@@ -277,7 +374,7 @@ export class AttendanceService {
             name: `${a.user.firstName} ${a.user.lastName}`.trim(),
             checkInAt: a.timestamp.toISOString(),
             gpsOk: a.accuracyMeters < 400,
-            faceVerified: Boolean(a.imageUrl),
+            faceMatchScore: a.faceMatchScore,
             suspicious: a.accuracyMeters >= 250,
         }));
     }

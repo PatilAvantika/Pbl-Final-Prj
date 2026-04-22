@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { IsIn, IsNotEmpty, IsString, IsUUID } from 'class-validator';
 import { AttendanceService } from './attendance.service';
+import type { MarkAttendanceInput } from './attendance.service';
 import { ClockInDto } from './dto/clock-in.dto';
 import { AuthGuard } from '@nestjs/passport';
 import { RolesGuard } from '../auth/roles.guard';
@@ -39,6 +40,26 @@ function requireOrganizationId(req: { user?: { organizationId?: string } }): str
 @Controller('attendance')
 export class AttendanceController {
     constructor(private readonly attendanceService: AttendanceService) { }
+
+    @Post('mark')
+    async mark(@Request() req: any, @Body() data: ClockInDto) {
+        if (data.type !== 'CLOCK_IN' && data.type !== 'CLOCK_OUT') {
+            throw new BadRequestException('type must be CLOCK_IN or CLOCK_OUT');
+        }
+        if (data.lat === undefined || data.lat === null) {
+            throw new BadRequestException('Missing latitude for attendance');
+        }
+        if (data.lng === undefined || data.lng === null) {
+            throw new BadRequestException('Missing longitude for attendance');
+        }
+        const organizationId = requireOrganizationId(req);
+        return this.attendanceService.markAttendance(
+            req.user.id,
+            req.user.role,
+            organizationId,
+            data as MarkAttendanceInput,
+        );
+    }
 
     @Post('clock-in')
     async clockIn(@Request() req: any, @Body() data: ClockInDto) {

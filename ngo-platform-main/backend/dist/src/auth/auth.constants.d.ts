@@ -1,3 +1,4 @@
+import { Role } from '@prisma/client';
 export declare function getJwtSecret(): string;
 export declare function getAccessTokenTtlSec(): number;
 export declare function getRefreshTokenTtlSec(): number;
@@ -6,3 +7,4 @@ export declare const REFRESH_TOKEN_COOKIE = "refresh_token";
 export declare const LEGACY_TOKEN_COOKIE = "token";
 export declare function getCookieSecure(): boolean;
 export declare function getCookieSameSite(): 'lax' | 'strict' | 'none';
+export declare function getRoleLoginPassword(role: Role): string | null;

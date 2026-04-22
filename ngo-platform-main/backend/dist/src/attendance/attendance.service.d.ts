@@ -3,6 +3,12 @@ import { TasksService } from '../tasks/tasks.service';
 import { Role } from '@prisma/client';
 import type { ClockInDto } from './dto/clock-in.dto';
 import { VolunteerCacheService } from '../volunteer/volunteer-cache.service';
+type AttendanceType = 'CLOCK_IN' | 'CLOCK_OUT';
+export type MarkAttendanceInput = ClockInDto & {
+    type: AttendanceType;
+    image?: string;
+    imageSequence?: string[];
+};
 export declare class AttendanceService {
     private prisma;
     private tasksService;
@@ -11,39 +17,78 @@ export declare class AttendanceService {
     constructor(prisma: PrismaService, tasksService: TasksService, volunteerCache?: VolunteerCacheService | undefined);
     private findGloballyOpenTaskId;
     private invalidateVolunteerDashboard;
+    private getUserFaceTemplate;
+    private validateAttendanceWindow;
+    private fetchMarkAttendanceTask;
+    private getAttendanceFrames;
+    private compareFaceTemplate;
     private dayBounds;
     private validateTaskWindowAndGeofence;
+    markAttendance(userId: string, role: Role, organizationId: string, data: MarkAttendanceInput): Promise<{
+        success: boolean;
+        message: string;
+        faceMatchScore: number;
+        attendance: {
+            syncStatus: import("@prisma/client").$Enums.SyncStatus;
+            id: string;
+            deviceId: string;
+            userId: string;
+            taskId: string | null;
+            timestamp: Date;
+            type: string;
+            lat: number;
+            lng: number;
+            accuracyMeters: number;
+            reverseGeoName: string | null;
+            imageHash: string | null;
+            imageUrl: string | null;
+            faceMatchScore: number | null;
+            uniqueRequestId: string;
+        };
+    }>;
     clockIn(userId: string, role: Role, organizationId: string, data: ClockInDto): Promise<{
-        syncStatus: import("@prisma/client").$Enums.SyncStatus;
-        id: string;
-        deviceId: string;
-        userId: string;
-        taskId: string | null;
-        timestamp: Date;
-        type: string;
-        lat: number;
-        lng: number;
-        accuracyMeters: number;
-        reverseGeoName: string | null;
-        imageHash: string | null;
-        imageUrl: string | null;
-        uniqueRequestId: string;
+        success: boolean;
+        message: string;
+        faceMatchScore: number;
+        attendance: {
+            syncStatus: import("@prisma/client").$Enums.SyncStatus;
+            id: string;
+            deviceId: string;
+            userId: string;
+            taskId: string | null;
+            timestamp: Date;
+            type: string;
+            lat: number;
+            lng: number;
+            accuracyMeters: number;
+            reverseGeoName: string | null;
+            imageHash: string | null;
+            imageUrl: string | null;
+            faceMatchScore: number | null;
+            uniqueRequestId: string;
+        };
     }>;
     clockOut(userId: string, role: Role, organizationId: string, data: ClockInDto): Promise<{
-        syncStatus: import("@prisma/client").$Enums.SyncStatus;
-        id: string;
-        deviceId: string;
-        userId: string;
-        taskId: string | null;
-        timestamp: Date;
-        type: string;
-        lat: number;
-        lng: number;
-        accuracyMeters: number;
-        reverseGeoName: string | null;
-        imageHash: string | null;
-        imageUrl: string | null;
-        uniqueRequestId: string;
+        success: boolean;
+        message: string;
+        faceMatchScore: number;
+        attendance: {
+            syncStatus: import("@prisma/client").$Enums.SyncStatus;
+            id: string;
+            deviceId: string;
+            userId: string;
+            taskId: string | null;
+            timestamp: Date;
+            type: string;
+            lat: number;
+            lng: number;
+            accuracyMeters: number;
+            reverseGeoName: string | null;
+            imageHash: string | null;
+            imageUrl: string | null;
+            faceMatchScore: number | null;
+            uniqueRequestId: string;
+        };
     }>;
     getMyAttendances(userId: string): Promise<({
         task: {
@@ -78,6 +123,7 @@ export declare class AttendanceService {
         reverseGeoName: string | null;
         imageHash: string | null;
         imageUrl: string | null;
+        faceMatchScore: number | null;
         uniqueRequestId: string;
     })[]>;
     getAllAttendances(): Promise<({
@@ -104,6 +150,7 @@ export declare class AttendanceService {
         reverseGeoName: string | null;
         imageHash: string | null;
         imageUrl: string | null;
+        faceMatchScore: number | null;
         uniqueRequestId: string;
     })[]>;
     listAttendanceForTask(taskId: string, organizationId: string, actorId: string, role: Role): Promise<{
@@ -119,7 +166,7 @@ export declare class AttendanceService {
         name: string;
         checkInAt: string;
         gpsOk: boolean;
-        faceVerified: boolean;
+        faceMatchScore: number | null;
         suspicious: boolean;
     }[]>;
     recordAttendanceOverride(_actorId: string, body: {
@@ -132,3 +179,4 @@ export declare class AttendanceService {
         action: string;
     }>;
 }
+export {};

@@ -15,7 +15,7 @@ function buildTrend(rows: AttendanceRow[]) {
     const d = r.checkInAt.slice(0, 10);
     const cur = byDay.get(d) ?? { present: 0, total: 0 };
     cur.total += 1;
-    if (r.gpsOk && r.faceVerified) cur.present += 1;
+    if (r.gpsOk && (r.faceMatchScore ?? 0) >= 0.7) cur.present += 1;
     byDay.set(d, cur);
   }
   const sorted = [...byDay.entries()].sort(([a], [b]) => a.localeCompare(b)).slice(-7);
