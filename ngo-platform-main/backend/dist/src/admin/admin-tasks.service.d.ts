@@ -1,0 +1,71 @@
+import { TaskLifecycleStatus } from '@prisma/client';
+import { PrismaService } from '../prisma/prisma.service';
+import { TasksService } from '../tasks/tasks.service';
+import { AuditService } from '../audit/audit.service';
+import type { AdminTasksQueryDto } from './dto/admin-tasks-query.dto';
+import type { AdminPatchTaskDto } from './dto/admin-patch-task.dto';
+export type AdminTaskListItem = {
+    id: string;
+    title: string;
+    locationName: string;
+    status: TaskLifecycleStatus;
+    template: string;
+    assignmentsCount: number;
+    startTime: Date;
+    endTime: Date;
+    isActive: boolean;
+    geofenceLat: number;
+    geofenceLng: number;
+    geofenceRadius: number;
+    description: string | null;
+};
+export declare class AdminTasksService {
+    private readonly prisma;
+    private readonly tasksService;
+    private readonly auditService;
+    constructor(prisma: PrismaService, tasksService: TasksService, auditService: AuditService);
+    list(organizationId: string, query: AdminTasksQueryDto): Promise<{
+        tasks: AdminTaskListItem[];
+        total: number;
+        limit: number;
+        offset: number;
+    }>;
+    findOne(organizationId: string, id: string): Promise<import("../tasks/tasks.service").TaskWithAssignments>;
+    private replaceAssignments;
+    patch(organizationId: string, taskId: string, dto: AdminPatchTaskDto, actorId?: string): Promise<{
+        organizationId: string;
+        isActive: boolean;
+        lifecycleStatus: import("@prisma/client").$Enums.TaskLifecycleStatus;
+        id: string;
+        title: string;
+        description: string | null;
+        template: import("@prisma/client").$Enums.TaskTemplate;
+        zoneName: string;
+        geofenceLat: number;
+        geofenceLng: number;
+        geofenceRadius: number;
+        startTime: Date;
+        endTime: Date;
+        priority: string | null;
+        maxVolunteers: number | null;
+        teamLeaderId: string | null;
+    }>;
+    softDelete(organizationId: string, taskId: string, actorId?: string): Promise<{
+        organizationId: string;
+        isActive: boolean;
+        lifecycleStatus: import("@prisma/client").$Enums.TaskLifecycleStatus;
+        id: string;
+        title: string;
+        description: string | null;
+        template: import("@prisma/client").$Enums.TaskTemplate;
+        zoneName: string;
+        geofenceLat: number;
+        geofenceLng: number;
+        geofenceRadius: number;
+        startTime: Date;
+        endTime: Date;
+        priority: string | null;
+        maxVolunteers: number | null;
+        teamLeaderId: string | null;
+    }>;
+}
