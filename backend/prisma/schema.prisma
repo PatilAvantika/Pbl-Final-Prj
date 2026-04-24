@@ -1,0 +1,392 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// --- ENUMS ---
+enum Role { 
+  SUPER_ADMIN 
+  NGO_ADMIN 
+  HR_MANAGER 
+  FINANCE_MANAGER 
+  FIELD_COORDINATOR 
+  TEAM_LEADER 
+  VOLUNTEER 
+  STAFF 
+  DONOR
+}
+
+enum DonorCampaignStatus {
+  ACTIVE
+  COMPLETED
+}
+
+enum TaskTemplate { 
+  WASTE_COLLECTION 
+  PLANTATION 
+  AWARENESS 
+  SURVEY 
+  TRAINING 
+}
+
+enum LeaveType { 
+  CASUAL 
+  SICK 
+  EARNED 
+  HALF_DAY 
+  UNPAID 
+  COMP_OFF 
+}
+
+enum LeaveStatus { 
+  PENDING 
+  APPROVED 
+  REJECTED 
+}
+
+enum SyncStatus { 
+  PENDING_SYNC 
+  SYNCED 
+  FAILED 
+}
+
+enum ReportStatus {
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
+/// Field-ops task lifecycle (merged from legacy Express state machine).
+enum TaskLifecycleStatus {
+  PENDING
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum AuditAction {
+  USER_CREATED
+  USER_UPDATED
+  USER_DELETED
+  TASK_CREATED
+  TASK_UPDATED
+  TASK_DELETED
+  TASK_ASSIGNED
+  TASK_UNASSIGNED
+  LEAVE_STATUS_UPDATED
+  REPORT_STATUS_UPDATED
+  PAYSLIP_GENERATED
+  DONOR_REPORTS_LIST_VIEWED
+  DONOR_REPORT_PDF_DOWNLOADED
+}
+
+// --- MULTI-TENANT ---
+model Organization {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+
+  users          User[]
+  tasks          Task[]
+  donorCampaigns DonorCampaign[]
+  fieldReports   FieldReport[]
+  resources      Resource[]
+}
+
+// --- CORE ---
+model User {
+  id             String    @id @default(uuid())
+  email          String    @unique
+  passwordHash   String
+  role           Role
+  firstName      String
+  lastName       String
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  deviceId       String?   // For duplicate detection
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  /// When set, JWTs with iat before this instant are rejected (logout / forced re-auth).
+  authInvalidatedAt DateTime?
+
+  // Volunteer / staff field profile & onboarding (Attendance & Authenticity)
+  phone                    String?
+  department               String?
+  emergencyContactName     String?
+  emergencyContactPhone    String?
+  onboardingProfileComplete           Boolean @default(false)
+  onboardingFaceComplete            Boolean @default(false)
+  onboardingAttendanceIntroComplete Boolean @default(false)
+  /// Stored face enrollment frames [{ "angle": "front"|"left"|"right", "dataUrl": "..." }]; omitted from API list responses.
+  faceEnrollmentSamples    Json?
+  /// IANA timezone for volunteer dashboard (month boundaries, streak). Default UTC.
+  timezone                 String?  @default("UTC")
+
+  // Relations
+  attendances   Attendance[]
+  tasks         TaskAssignment[]
+  leaves        Leave[]
+  payslips      Payslip[]
+  reports       FieldReport[] @relation("ReportAuthor")
+  approvedReports FieldReport[] @relation("ReportApprover")
+  auditLogs     AuditLog[]   @relation("AuditActor")
+  refreshTokens RefreshToken[]
+  donations     Donation[]
+  /// Tasks owned by this team leader (field ops).
+  ledTasks      Task[]       @relation("TaskTeamLeader")
+  /// Volunteers this user has added to their field roster (team leader / coordinator).
+  teamRosterLed      TeamRosterEntry[] @relation("TeamLeaderRosterLed")
+  teamRosterAsMember TeamRosterEntry[] @relation("TeamRosterVolunteer")
+
+  @@index([organizationId])
+}
+
+/// Team leader (or coordinator) curated list of volunteers for quick assign / visibility.
+model TeamRosterEntry {
+  id          String   @id @default(uuid())
+  leaderId    String
+  volunteerId String
+  createdAt   DateTime @default(now())
+  leader      User     @relation("TeamLeaderRosterLed", fields: [leaderId], references: [id], onDelete: Cascade)
+  volunteer   User     @relation("TeamRosterVolunteer", fields: [volunteerId], references: [id], onDelete: Cascade)
+
+  @@unique([leaderId, volunteerId])
+  @@index([leaderId])
+}
+
+/// Opaque refresh tokens (hashed). Raw token sent only in httpOnly cookie.
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Task {
+  id              String       @id @default(uuid())
+  title           String
+  description     String?
+  template        TaskTemplate
+  zoneName        String
+  geofenceLat     Float
+  geofenceLng     Float
+  geofenceRadius  Float        // in meters
+  startTime       DateTime
+  endTime         DateTime
+  /// LOW | MEDIUM | HIGH — optional for volunteer capacity / triage UIs
+  priority        String?      @default("MEDIUM")
+  maxVolunteers   Int?
+  isActive        Boolean      @default(true)
+  lifecycleStatus TaskLifecycleStatus @default(PENDING)
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  teamLeaderId    String?
+  teamLeader      User?        @relation("TaskTeamLeader", fields: [teamLeaderId], references: [id], onDelete: SetNull)
+
+  // Relations
+  assignments     TaskAssignment[]
+  attendances     Attendance[]
+  reports         FieldReport[]
+  donorCampaign   DonorCampaign?
+  resourceAllocations ResourceAllocation[]
+
+  @@index([organizationId])
+  @@index([lifecycleStatus])
+  @@index([organizationId, lifecycleStatus])
+  @@index([teamLeaderId])
+}
+
+/// Inventory item for field operations (team leader resource allocation).
+model Resource {
+  id             String   @id @default(uuid())
+  name           String
+  quantity       Int      @default(0)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  allocations    ResourceAllocation[]
+
+  @@index([organizationId])
+}
+
+model ResourceAllocation {
+  id         String   @id @default(uuid())
+  resourceId String
+  taskId     String
+  quantity   Int
+  resource   Resource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  task       Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+  @@index([resourceId])
+}
+
+model DonorCampaign {
+  id          String               @id @default(uuid())
+  title       String
+  description String?
+  zoneName    String
+  lat         Float
+  lng         Float
+  startDate   DateTime?
+  endDate     DateTime?
+  status      DonorCampaignStatus  @default(ACTIVE)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  taskId      String?              @unique
+  task        Task?                @relation(fields: [taskId], references: [id])
+  donations   Donation[]
+  campaignReports CampaignReport[]
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  @@index([status])
+  @@index([organizationId])
+}
+
+/// Explicit link from a donor-funded campaign to a field report (in addition to reports on the campaign task).
+model CampaignReport {
+  id         String        @id @default(uuid())
+  campaignId String
+  reportId   String
+  campaign   DonorCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  report     FieldReport   @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  createdAt  DateTime      @default(now())
+
+  @@unique([campaignId, reportId])
+  @@index([reportId])
+}
+
+model Donation {
+  id         String        @id @default(uuid())
+  donorId    String
+  donor      User          @relation(fields: [donorId], references: [id], onDelete: Cascade)
+  campaignId String
+  campaign   DonorCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  amount     Float
+  currency   String        @default("INR")
+  createdAt  DateTime      @default(now())
+
+  @@index([donorId])
+  @@index([campaignId])
+  @@index([createdAt])
+}
+
+model TaskAssignment {
+  id        String   @id @default(uuid())
+  userId    String
+  taskId    String
+  user      User     @relation(fields: [userId], references: [id])
+  task      Task     @relation(fields: [taskId], references: [id])
+  
+  @@unique([userId, taskId])
+  @@index([userId])
+}
+
+// --- FIELD OPERATIONS ---
+model Attendance {
+  id               String     @id @default(uuid())
+  userId           String
+  taskId           String?    
+  timestamp        DateTime   @default(now())
+  type             String     // 'CLOCK_IN', 'CLOCK_OUT'
+  
+  // Geo-Intelligence
+  lat              Float
+  lng              Float
+  accuracyMeters   Float
+  reverseGeoName   String?
+  
+  // Device & Security
+  deviceId         String
+  imageHash        String?    @unique // Duplicate detection
+  imageUrl         String?
+  faceMatchScore   Float?
+  uniqueRequestId  String     @unique // Idempotency key
+  syncStatus       SyncStatus @default(SYNCED)
+  
+  user             User       @relation(fields: [userId], references: [id])
+  task             Task?      @relation(fields: [taskId], references: [id])
+
+  @@unique([userId, taskId, timestamp]) // Prevent double attendance for same task/day
+  @@index([userId, timestamp])
+}
+
+model FieldReport {
+  id              String   @id @default(uuid())
+  taskId          String
+  userId          String
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  beforePhotoUrl  String?
+  afterPhotoUrl   String?
+  quantityItems   Int?     // e.g. bags of waste collected
+  notes           String?
+  /// Optional short AI-generated summary + impact (non-blocking; filled async after submit).
+  aiSummary       String?  @map("ai_summary")
+  timestamp       DateTime @default(now())
+  status          ReportStatus @default(SUBMITTED)
+  approvedById    String?
+  approvedAt      DateTime?
+  
+  task            Task     @relation(fields: [taskId], references: [id])
+  user            User     @relation("ReportAuthor", fields: [userId], references: [id])
+  approvedBy      User?    @relation("ReportApprover", fields: [approvedById], references: [id])
+  campaignReports CampaignReport[]
+
+  @@index([organizationId])
+}
+
+// --- HR & PAYROLL ---
+model Leave {
+  id        String      @id @default(uuid())
+  userId    String
+  type      LeaveType
+  startDate DateTime
+  endDate   DateTime
+  status    LeaveStatus @default(PENDING)
+  reason    String
+  
+  user      User        @relation(fields: [userId], references: [id])
+}
+
+model Payslip {
+  id              String   @id @default(uuid())
+  userId          String
+  month           Int
+  year            Int
+  baseSalary      Float
+  attendanceDays  Int
+  absences        Int
+  overtimeHours   Float
+  bonuses         Float
+  deductions      Float
+  netPay          Float
+  pdfUrl          String?
+  
+  user            User     @relation(fields: [userId], references: [id])
+  @@unique([userId, month, year])
+}
+
+model AuditLog {
+  id         String      @id @default(uuid())
+  actorId    String?
+  action     AuditAction
+  entityType String
+  entityId   String
+  metadata   Json?
+  createdAt  DateTime    @default(now())
+
+  actor      User?       @relation("AuditActor", fields: [actorId], references: [id])
+
+  @@index([entityType, entityId, createdAt])
+}

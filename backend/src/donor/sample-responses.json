@@ -1,0 +1,83 @@
+{
+  "GET /donor/dashboard": {
+    "summary": {
+      "totalDonations": 80000,
+      "campaignsSupported": 2,
+      "totalImpact": 41,
+      "volunteerHours": 35,
+      "currency": "INR"
+    },
+    "kpis": {
+      "totalDonations": 80000,
+      "campaignsSupported": 2,
+      "wasteCollected": 41,
+      "totalImpact": 41,
+      "volunteerHoursSupported": 35,
+      "volunteerHours": 35,
+      "currency": "INR"
+    },
+    "donationTrend": [{ "month": "2025-11", "amount": 0 }, { "month": "2025-12", "amount": 15000 }],
+    "impactDistribution": [{ "name": "PLANTATION", "value": 1 }],
+    "recentCampaigns": [],
+    "recentReports": []
+  },
+  "GET /donor/campaigns": [
+    {
+      "id": "uuid",
+      "title": "Aarey Green Belt — Donor-funded",
+      "description": "Native sapling programme…",
+      "zoneName": "Aarey Colony Zone 3",
+      "lat": 19.1687,
+      "lng": 72.8794,
+      "startDate": "2026-04-05T07:00:00.000Z",
+      "endDate": "2026-04-05T13:00:00.000Z",
+      "status": "ACTIVE",
+      "contributed": 40000,
+      "currency": "INR",
+      "taskId": "uuid",
+      "template": "PLANTATION",
+      "impact": {
+        "wasteBagsEstimate": null,
+        "treesEstimate": 200,
+        "verifiedWasteTotal": 22,
+        "approvedReportCount": 1
+      }
+    }
+  ],
+  "GET /donor/reports": [
+    {
+      "id": "uuid",
+      "taskId": "uuid",
+      "userId": "uuid",
+      "beforePhotoUrl": "https://…",
+      "afterPhotoUrl": "https://…",
+      "quantityItems": 22,
+      "wasteCollected": 22,
+      "notes": "…",
+      "timestamp": "2026-04-02T13:10:00.000Z",
+      "status": "APPROVED",
+      "gps": { "lat": 19.1687, "lng": 72.8794 },
+      "task": { "title": "…", "zoneName": "…", "geofenceLat": 19.1687, "geofenceLng": 72.8794 },
+      "user": { "firstName": "Priya", "lastName": "Sharma" },
+      "approvedBy": { "firstName": "Ananya", "lastName": "Kapoor" }
+    }
+  ],
+  "GET /donor/analytics": {
+    "heatmap": [{ "lat": 19.17, "lng": 72.88, "intensity": 0.8, "label": "Campaign title" }],
+    "wasteTrend": [{ "month": "2026-03", "bags": 22 }],
+    "volunteerParticipation": [{ "userId": "uuid", "sessions": 8 }],
+    "campaignSuccessRate": 50,
+    "fundedCampaignsTotal": 2,
+    "campaignPerformance": [
+      {
+        "campaignId": "uuid",
+        "title": "Aarey Green Belt — Donor-funded",
+        "status": "ACTIVE",
+        "verifiedWasteTotal": 22,
+        "approvedReportCount": 1,
+        "isComplete": false
+      }
+    ]
+  },
+  "GET /donor/report/:id/pdf": "Binary application/pdf (attachment)"
+}
